@@ -14,3 +14,8 @@ export enum InjectionRole {
 export const MODULE_NAME = 'spotify';
 export const INJECT_ID = 'spotify_inject';
 export const VERIFIER_KEY = 'spotify_verifier';
+
+export const SPOTIFY_SCOPES = [
+    'user-read-private',
+    'user-read-playback-state',
+];

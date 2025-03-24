@@ -1,6 +1,6 @@
 import { SpotifyApi, AccessToken, Track, Episode } from '@spotify/web-api-ts-sdk';
 import { sha256, generateRandomString, base64encode } from './util';
-import { InjectionPosition, InjectionRole, VERIFIER_KEY, MODULE_NAME, INJECT_ID } from './constants';
+import { InjectionPosition, InjectionRole, VERIFIER_KEY, MODULE_NAME, INJECT_ID, SPOTIFY_SCOPES } from './constants';
 import html from './settings.html';
 
 const {
@@ -8,7 +8,7 @@ const {
     saveSettingsDebounced,
     setExtensionPrompt,
     substituteParamsExtended,
-} = globalThis.SillyTavern.getContext();
+} = SillyTavern.getContext();
 
 interface ExtensionSettings {
     clientId: string;
@@ -19,6 +19,10 @@ interface ExtensionSettings {
     depth: number;
     scan: boolean;
     [key: string]: any; // Allow additional properties
+}
+
+interface GlobalSettings {
+    [MODULE_NAME]: ExtensionSettings;
 }
 
 // Define default settings
@@ -34,19 +38,21 @@ const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
 
 // Define a function to get or initialize settings
 function getSettings(): ExtensionSettings {
+    const globalSettings = extensionSettings as {} as GlobalSettings;
+
     // Initialize settings if they don't exist
-    if (!extensionSettings[MODULE_NAME]) {
-        extensionSettings[MODULE_NAME] = structuredClone(defaultSettings);
+    if (!globalSettings[MODULE_NAME]) {
+        globalSettings[MODULE_NAME] = structuredClone(defaultSettings);
     }
 
     // Ensure all default keys exist (helpful after updates)
     for (const key in defaultSettings) {
-        if (extensionSettings[MODULE_NAME][key] === undefined) {
-            extensionSettings[MODULE_NAME][key] = defaultSettings[key];
+        if (globalSettings[MODULE_NAME][key] === undefined) {
+            globalSettings[MODULE_NAME][key] = defaultSettings[key];
         }
     }
 
-    return extensionSettings[MODULE_NAME];
+    return globalSettings[MODULE_NAME];
 }
 
 function addSettingsControls(settings: ExtensionSettings): void {
@@ -138,7 +144,7 @@ async function authenticateSpotify(): Promise<void> {
     const params = {
         response_type: 'code',
         client_id: settings.clientId,
-        scope: 'user-read-private user-read-currently-playing',
+        scope: SPOTIFY_SCOPES.join(' '),
         redirect_uri: redirectUri.toString(),
         code_challenge_method: 'S256',
         code_challenge: codeChallenge,
@@ -264,7 +270,7 @@ async function refreshTokenIfNeeded(settings: ExtensionSettings): Promise<void> 
 
 async function setCurrentTrack(): Promise<void> {
     // Reset the prompt to avoid showing old data
-    setExtensionPrompt(INJECT_ID, '');
+    setExtensionPrompt(INJECT_ID, '', InjectionPosition.None, 0);
 
     const settings = getSettings();
     if (!settings.clientToken || !settings.clientId || !settings.template) {
