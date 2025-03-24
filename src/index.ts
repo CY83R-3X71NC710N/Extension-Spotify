@@ -17,6 +17,7 @@ interface ExtensionSettings {
     position: InjectionPosition;
     role: InjectionRole;
     depth: number;
+    scan: boolean;
     [key: string]: any; // Allow additional properties
 }
 
@@ -28,6 +29,7 @@ const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
     position: InjectionPosition.InChat,
     role: InjectionRole.System,
     depth: 1,
+    scan: true,
 });
 
 // Define a function to get or initialize settings
@@ -63,6 +65,7 @@ function addSettingsControls(settings: ExtensionSettings): void {
     const role = document.getElementById('spotify_role') as HTMLSelectElement;
     const position = Array.from(document.getElementsByName('spotify_position')) as HTMLInputElement[];
     const depth = document.getElementById('spotify_depth') as HTMLInputElement;
+    const scan = document.getElementById('spotify_scan') as HTMLInputElement;
 
     clientId.value = settings.clientId;
     template.value = settings.template;
@@ -71,6 +74,7 @@ function addSettingsControls(settings: ExtensionSettings): void {
         radio.checked = settings.position === parseInt(radio.value);
     });
     depth.value = settings.depth.toString();
+    scan.checked = settings.scan;
 
     clientId.addEventListener('input', () => {
         settings.clientId = clientId.value;
@@ -92,6 +96,10 @@ function addSettingsControls(settings: ExtensionSettings): void {
     });
     depth.addEventListener('input', () => {
         settings.depth = parseInt(depth.value);
+        saveSettingsDebounced();
+    });
+    scan.addEventListener('change', () => {
+        settings.scan = scan.checked;
         saveSettingsDebounced();
     });
 
@@ -270,7 +278,7 @@ async function setCurrentTrack(): Promise<void> {
         console.log('Currently playing Spotify track:', currentlyPlaying);
         const params = getPromptParams(currentlyPlaying.item);
         const message = substituteParamsExtended(settings.template, params);
-        setExtensionPrompt(INJECT_ID, message, settings.position, settings.depth, true, settings.role);
+        setExtensionPrompt(INJECT_ID, message, settings.position, settings.depth, settings.scan, settings.role);
     } catch (error) {
         console.error('Error fetching currently playing track:', error);
     }
