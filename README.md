@@ -67,6 +67,15 @@ Example:
 {{user}} is listening to {{song}} by {{artist}} from the album {{album}} ({{year}}).
 ```
 
+### Function tools
+
+The extension provides [function tools](https://docs.sillytavern.app/for-contributors/function-calling/) for supported APIs. The following functions are available (can be toggled individually in the extension settings):
+
+1. "Search Tracks": Search for tracks by name, artist or album.
+2. "Control Playback": Play a track, pause, resume, skip to the next track or the previous track.
+3. "Get Top Tracks": Get top tracks of the user.
+4. "Get Playlists": Get playlists of the user.
+
 ## License
 
 AGPL-3.0. See [LICENSE](LICENSE) for more details.

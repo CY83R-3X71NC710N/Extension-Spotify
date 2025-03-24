@@ -18,4 +18,7 @@ export const VERIFIER_KEY = 'spotify_verifier';
 export const SPOTIFY_SCOPES = [
     'user-read-private',
     'user-read-playback-state',
+    'user-top-read',
+    'user-modify-playback-state',
+    'playlist-read-private',
 ];

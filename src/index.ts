@@ -9,6 +9,8 @@ const {
     saveSettingsDebounced,
     setExtensionPrompt,
     substituteParamsExtended,
+    registerFunctionTool,
+    unregisterFunctionTool,
     t,
 } = SillyTavern.getContext();
 
@@ -20,11 +22,25 @@ interface ExtensionSettings {
     role: InjectionRole;
     depth: number;
     scan: boolean;
+    // Tools
+    searchTracks: boolean;
+    controlPlayback: boolean;
+    getTopTracks: boolean;
+    getPlaylists: boolean;
     [key: string]: any; // Allow additional properties
 }
 
 interface GlobalSettings {
     [MODULE_NAME]: ExtensionSettings;
+}
+
+interface ToolDefinition {
+    name: string;
+    displayName: string;
+    description: string;
+    parameters: object;
+    action: (...args: any[]) => Promise<any>;
+    shouldRegister: () => Promise<boolean>;
 }
 
 // Define default settings
@@ -36,6 +52,10 @@ const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
     role: InjectionRole.System,
     depth: 1,
     scan: true,
+    searchTracks: true,
+    controlPlayback: true,
+    getTopTracks: true,
+    getPlaylists: true,
 });
 
 // Define a function to get or initialize settings
@@ -78,6 +98,12 @@ function addSettingsControls(settings: ExtensionSettings): void {
         scan: document.getElementById('spotify_scan') as HTMLInputElement,
         authButton: document.getElementById('spotify_auth') as HTMLDivElement,
         logoutButton: document.getElementById('spotify_logout') as HTMLDivElement,
+        tools: {
+            searchTracks: document.getElementById('spotify_tool_search_tracks') as HTMLInputElement,
+            controlPlayback: document.getElementById('spotify_tool_control_playback') as HTMLInputElement,
+            getTopTracks: document.getElementById('spotify_tool_get_top_tracks') as HTMLInputElement,
+            getPlaylists: document.getElementById('spotify_tool_get_playlists') as HTMLInputElement,
+        },
     };
 
     // Initialize UI with current settings
@@ -89,28 +115,40 @@ function addSettingsControls(settings: ExtensionSettings): void {
     });
     elements.depth.value = settings.depth.toString();
     elements.scan.checked = settings.scan;
+    elements.tools.searchTracks.checked = settings.searchTracks;
+    elements.tools.controlPlayback.checked = settings.controlPlayback;
+    elements.tools.getTopTracks.checked = settings.getTopTracks;
+    elements.tools.getPlaylists.checked = settings.getPlaylists
 
     // Define a generic handler for simple input changes
     const handleInputChange = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
         element: T,
         settingKey: keyof ExtensionSettings,
-        transform?: (value: string | boolean) => any
+        transform?: (value: string | boolean) => any,
+        callback?: () => void,
     ) => {
         element.addEventListener('input', () => {
             const value = element instanceof HTMLInputElement && element.type === 'checkbox'
                 ? element.checked
                 : element.value;
             settings[settingKey] = transform ? transform(value) : value;
+            if (callback) {
+                callback();
+            }
             saveSettingsDebounced();
         });
     };
 
     // Set up event listeners
-    handleInputChange(elements.clientId, 'clientId');
-    handleInputChange(elements.template, 'template');
-    handleInputChange(elements.role, 'role', value => parseInt(value as string));
-    handleInputChange(elements.depth, 'depth', value => parseInt(value as string));
-    handleInputChange(elements.scan, 'scan');
+    handleInputChange(elements.clientId, 'clientId', value => value);
+    handleInputChange(elements.template, 'template', value => value, resetInject);
+    handleInputChange(elements.role, 'role', value => parseInt(value as string), resetInject);
+    handleInputChange(elements.depth, 'depth', value => parseInt(value as string), resetInject);
+    handleInputChange(elements.scan, 'scan', value => value, resetInject);
+    handleInputChange(elements.tools.searchTracks, 'searchTracks', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.controlPlayback, 'controlPlayback', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getTopTracks, 'getTopTracks', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getPlaylists, 'getPlaylists', value => value, syncFunctionTools);
 
     // Handle radio buttons separately
     elements.position.forEach((radio) => {
@@ -278,9 +316,13 @@ async function refreshTokenIfNeeded(settings: ExtensionSettings): Promise<void> 
     }
 }
 
-async function setCurrentTrack(): Promise<void> {
+function resetInject() {
     // Reset the prompt to avoid showing old data
     setExtensionPrompt(INJECT_ID, '', InjectionPosition.None, 0);
+}
+
+async function setCurrentTrack(): Promise<void> {
+    resetInject();
 
     const settings = getSettings();
     if (!settings.clientToken || !settings.clientId || !settings.template) {
@@ -325,6 +367,215 @@ function getPromptParams(value: Track | Episode) {
     return {};
 }
 
+function trackToViewModel(track: Track) {
+    return {
+        uri: track.uri,
+        name: track.name,
+        artist: track.artists.map(a => a.name)?.join(', '),
+        album: track.album.name,
+    };
+}
+
+export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
+    'searchTracks': {
+        name: 'SpotifySearchTracks',
+        displayName: 'Spotify: Search Tracks',
+        description: 'Search for tracks on Spotify. Call when you need to find a URI for a track.',
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: {
+                query: {
+                    type: 'string',
+                    description: 'The search query for the track.',
+                },
+            },
+            required: ['query'],
+        },
+        shouldRegister: () => {
+            const settings = getSettings();
+            return Promise.resolve(!!(settings.clientToken && settings.clientId));
+        },
+        action: async ({ query }: { query: string }) => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                const result = await api.search(query, ['track']);
+                const tracks = result.tracks.items.map(trackToViewModel);
+                return tracks;
+            } catch (error) {
+                console.error('Error searching tracks:', error);
+                return 'Error searching tracks.';
+            }
+        },
+    },
+    'controlPlayback': {
+        name: 'SpotifyControlPlayback',
+        displayName: 'Spotify: Control Playback',
+        description: 'Control playback on Spotify. Call when the user wants to play, pause, skip or seek a track.',
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: {
+                action: {
+                    type: 'string',
+                    description: 'The action to perform on the track. Possible values are: play, pause, resume, next, previous.',
+                },
+                uri: {
+                    type: 'string',
+                    description: 'The URI of the track to perform the action on. Required for play action.',
+                },
+            },
+            required: ['action'],
+        },
+        shouldRegister: () => {
+            const settings = getSettings();
+            return Promise.resolve(!!(settings.clientToken && settings.clientId));
+        },
+        action: async ({ action, uri }: { action: string, uri?: string }) => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                const device = await api.player.getAvailableDevices();
+                const activeDevice = device.devices.find(d => d.is_active);
+                switch (action) {
+                    case 'play': {
+                        if (!uri) {
+                            return 'URI is required for play action.';
+                        }
+                        if (!activeDevice?.id) {
+                            return 'No active device found.';
+                        }
+                        await api.player.startResumePlayback(activeDevice.id, void 0, [uri]);
+                        return 'Playing track: ' + uri;
+                    }
+                    case 'pause': {
+                        if (!activeDevice?.id) {
+                            return 'No active device found.';
+                        }
+                        await api.player.pausePlayback(activeDevice.id);
+                        return 'Paused playback on device: ' + activeDevice?.name;
+                    }
+                    case 'resume': {
+                        if (!activeDevice?.id) {
+                            return 'No active device found.';
+                        }
+                        await api.player.startResumePlayback(activeDevice.id);
+                    }
+                    case 'next': {
+                        if (!activeDevice?.id) {
+                            return 'No active device found.';
+                        }
+                        await api.player.skipToNext(activeDevice.id);
+                        return 'Skipped to next track on device: ' + activeDevice?.name;
+                    }
+                    case 'previous': {
+                        if (!activeDevice?.id) {
+                            return 'No active device found.';
+                        }
+                        await api.player.skipToPrevious(activeDevice.id);
+                        return 'Skipped to previous track on device: ' + activeDevice?.name;
+                    }
+                    default:
+                        return 'Unknown action: ' + action;
+                }
+            } catch (error) {
+                console.error('Error controlling playback:', error);
+                return 'Error controlling playback.';
+            }
+        },
+    },
+    'getTopTracks': {
+        name: 'SpotifyGetTopTracks',
+        displayName: 'Spotify: Get Top Tracks',
+        description: 'Gets a list of user\'s top tracks. Call when the user wants to see their top tracks, play a favorite track, etc.',
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: {
+                timeRange: {
+                    type: 'string',
+                    description: 'The time range for the top tracks. Possible values are: short_term, medium_term, long_term.',
+                },
+            },
+            required: [],
+        },
+        shouldRegister: () => {
+            const settings = getSettings();
+            return Promise.resolve(!!(settings.clientToken && settings.clientId));
+        },
+        action: async ({ timeRange }: { timeRange: string }) => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                if (!['short_term', 'medium_term', 'long_term'].includes(timeRange)) {
+                    timeRange = 'short_term';
+                }
+                const result = await api.currentUser.topItems('tracks', timeRange as 'short_term' | 'medium_term' | 'long_term');
+                const topTracks = result.items.map(trackToViewModel);
+                return topTracks;
+            } catch (error) {
+                console.error('Error fetching top tracks:', error);
+                return 'Error fetching top tracks.';
+            }
+        },
+    },
+    'getPlaylists': {
+        name: 'SpotifyGetPlaylists',
+        displayName: 'Spotify: Get Playlists',
+        description: 'Gets a list of user\'s playlists. Call when the user wants to see their playlists.',
+        parameters: {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: {},
+            required: [],
+        },
+        shouldRegister: () => {
+            const settings = getSettings();
+            return Promise.resolve(!!(settings.clientToken && settings.clientId));
+        },
+        action: async () => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                const result = await api.currentUser.playlists.playlists();
+                const playlists = result.items.map(p => ({ uri: p.uri, name: p.name, description: p.description }));
+                return playlists;
+            } catch (error) {
+                console.error('Error fetching playlists:', error);
+                return 'Error fetching playlists.';
+            }
+        },
+    },
+};
+
+function syncFunctionTools(): void {
+    const settings = getSettings();
+    for (const [key, definition] of Object.entries(TOOL_DEFINITIONS)) {
+        if (settings[key]) {
+            registerFunctionTool(definition);
+        } else {
+            unregisterFunctionTool(key);
+        }
+    }
+}
+
 (async function () {
     const settings = getSettings();
     addSettingsControls(settings);
@@ -332,5 +583,6 @@ function getPromptParams(value: Track | Episode) {
     await refreshTokenIfNeeded(settings);
     await tryReadClientData(settings);
     globalThis.spotify_setCurrentTrack = setCurrentTrack;
+    syncFunctionTools();
     saveSettingsDebounced();
 })();
