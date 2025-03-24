@@ -10,3 +10,7 @@ export enum InjectionRole {
     User = 1,
     Assistant = 2,
 }
+
+export const MODULE_NAME = 'spotify';
+export const INJECT_ID = 'spotify_inject';
+export const VERIFIER_KEY = 'spotify_verifier';

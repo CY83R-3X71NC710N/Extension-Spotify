@@ -1,6 +1,6 @@
 import { SpotifyApi, AccessToken, Track, Episode } from '@spotify/web-api-ts-sdk';
-import { Sha256 } from '@aws-crypto/sha256-browser';
-import { InjectionPosition, InjectionRole } from './types';
+import { sha256, generateRandomString, base64encode } from './util';
+import { InjectionPosition, InjectionRole, VERIFIER_KEY, MODULE_NAME, INJECT_ID } from './constants';
 import html from './settings.html';
 
 const {
@@ -19,9 +19,6 @@ interface ExtensionSettings {
     depth: number;
     [key: string]: any; // Allow additional properties
 }
-
-const MODULE_NAME = 'spotify';
-const INJECT_ID = 'spotify_inject';
 
 // Define default settings
 const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
@@ -102,6 +99,20 @@ function addSettingsControls(settings: ExtensionSettings): void {
     authButton?.addEventListener('click', () => {
         authenticateSpotify();
     });
+
+    const logoutButton = document.getElementById('spotify_logout');
+    logoutButton?.addEventListener('click', () => {
+        settings.clientToken = null;
+        setUserName('[Not logged in]');
+        saveSettingsDebounced();
+    });
+}
+
+function setUserName(name: string): void {
+    const userName = document.getElementById('spotify_user_name') as HTMLSpanElement;
+    if (userName) {
+        userName.innerText = name;
+    }
 }
 
 async function authenticateSpotify(): Promise<void> {
@@ -112,29 +123,10 @@ async function authenticateSpotify(): Promise<void> {
         return;
     }
 
-    const generateRandomString = (length: number) => {
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        const values = crypto.getRandomValues(new Uint8Array(length));
-        return values.reduce((acc, x) => acc + possible[x % possible.length], '');
-    };
-    const base64encode = (input: Uint8Array) => {
-        return btoa(String.fromCharCode(...new Uint8Array(input)))
-            .replace(/=/g, '')
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_');
-    };
-    const sha256 = (message: string) => {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(message);
-        const hash = new Sha256();
-        hash.update(data);
-        return hash.digest();
-    };
-
     const codeVerifier = generateRandomString(64);
     const hashed = await sha256(codeVerifier);
     const codeChallenge = base64encode(hashed);
-    const redirectUri = new URL('/callback', location.origin);
+    const redirectUri = new URL('/callback/spotify', location.origin);
     const params = {
         response_type: 'code',
         client_id: settings.clientId,
@@ -142,10 +134,9 @@ async function authenticateSpotify(): Promise<void> {
         redirect_uri: redirectUri.toString(),
         code_challenge_method: 'S256',
         code_challenge: codeChallenge,
-        state: MODULE_NAME,
     };
 
-    sessionStorage.setItem('spotify_code_verifier', codeVerifier);
+    sessionStorage.setItem(VERIFIER_KEY, codeVerifier);
     const authUrl = new URL('https://accounts.spotify.com/authorize');
     authUrl.search = new URLSearchParams(params).toString();
     window.location.href = authUrl.toString();
@@ -153,14 +144,14 @@ async function authenticateSpotify(): Promise<void> {
 
 function readCode(): string | null {
     const urlParams = new URLSearchParams(window.location.search);
-    const cbQuery = urlParams.get('cb-query');
-    if (cbQuery) {
-        const cbQueryParams = new URLSearchParams(atob(cbQuery));
-        const code = cbQueryParams.get('code');
-        const state = cbQueryParams.get('state');
-        if (state !== MODULE_NAME) {
-            return null;
-        }
+    const source = urlParams.get('source');
+    if (source !== 'spotify') {
+        return null;
+    }
+    const query = urlParams.get('query');
+    if (query) {
+        const params = new URLSearchParams(query);
+        const code = params.get('code');
         window.history.replaceState({}, document.title, window.location.pathname);
         return code;
     }
@@ -169,13 +160,13 @@ function readCode(): string | null {
 
 async function tryGetClientToken(settings: ExtensionSettings): Promise<void> {
     const code = readCode();
-    const codeVerifier = sessionStorage.getItem('spotify_code_verifier');
+    const codeVerifier = sessionStorage.getItem(VERIFIER_KEY);
     if (!code || !codeVerifier || !settings.clientId) {
         return;
     }
 
     const url = 'https://accounts.spotify.com/api/token';
-    const redirectUri = new URL('/callback', location.origin);
+    const redirectUri = new URL('/callback/spotify', window.location.origin);
     const payload = {
         method: 'POST',
         headers: {
@@ -184,37 +175,87 @@ async function tryGetClientToken(settings: ExtensionSettings): Promise<void> {
         body: new URLSearchParams({
             client_id: settings.clientId,
             grant_type: 'authorization_code',
-            code,
             redirect_uri: redirectUri.toString(),
             code_verifier: codeVerifier,
+            code,
         }),
     }
 
-    const body = await fetch(url, payload);
-    const response = await body.json();
+    try {
+        const body = await fetch(url, payload);
+        const token = await body.json();
 
-    settings.clientToken = response;
-    sessionStorage.removeItem('spotify_code_verifier');
-    saveSettingsDebounced();
+        settings.clientToken = token;
+        sessionStorage.removeItem(VERIFIER_KEY);
+        saveSettingsDebounced();
+
+        console.log('Spotify token received:', token);
+        toastr.success('Successfully authenticated with Spotify!');
+    } catch (error) {
+        console.error('Error during Spotify authentication:', error);
+        toastr.error('Spotify authentication failed. Please try again.');
+    }
 }
 
 async function tryReadClientData(settings: ExtensionSettings): Promise<void> {
-    if (!settings.clientToken) {
+    if (!settings.clientToken || !settings.clientId) {
+        setUserName('[Not logged in]');
         return;
     }
 
-    const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-    const user = await api.currentUser.profile();
+    try {
+        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+        const user = await api.currentUser.profile();
+        setUserName(user.display_name || user.id);
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+        settings.clientToken = null;
+        setUserName('[Token expired]');
+    }
+}
 
-    if (!user) {
+async function refreshTokenIfNeeded(settings: ExtensionSettings): Promise<void> {
+    if (!settings.clientToken || !settings.clientId) {
         return;
     }
 
-    const userName = document.getElementById('spotify_user_name') as HTMLSpanElement;
-    userName.innerText = user.display_name || user.id;
+    const tokenExpiration = settings.clientToken.expires;
+    const refreshToken = settings.clientToken.refresh_token;
+    const currentTime = Date.now();
+    const refreshThreshold = 5 * 60 * 1000; // 5 minutes
+
+    if (tokenExpiration && (tokenExpiration - currentTime) < refreshThreshold) {
+        const url = 'https://accounts.spotify.com/api/token';
+        const payload = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: settings.clientId,
+            }),
+        };
+
+        try {
+            const body = await fetch(url, payload);
+            const token = await body.json();
+            settings.clientToken = token;
+            // When a refresh token is not returned, continue using the existing token.
+            if (settings.clientToken && !token.refresh_token) {
+                settings.clientToken.refresh_token = refreshToken;
+            }
+            console.log('Spotify token refreshed:', token);
+            saveSettingsDebounced();
+        } catch (error) {
+            console.error('Error refreshing Spotify token:', error);
+        }
+    }
 }
 
 async function setCurrentTrack(): Promise<void> {
+    // Reset the prompt to avoid showing old data
     setExtensionPrompt(INJECT_ID, '');
 
     const settings = getSettings();
@@ -222,11 +263,17 @@ async function setCurrentTrack(): Promise<void> {
         return;
     }
 
-    const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-    const currentlyPlaying = await api.player.getCurrentlyPlayingTrack();
-    const params = getPromptParams(currentlyPlaying.item);
-    const message = substituteParamsExtended(settings.template, params);
-    setExtensionPrompt(INJECT_ID, message, settings.position, settings.depth, true, settings.role);
+    try {
+        await refreshTokenIfNeeded(settings);
+        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+        const currentlyPlaying = await api.player.getCurrentlyPlayingTrack();
+        console.log('Currently playing Spotify track:', currentlyPlaying);
+        const params = getPromptParams(currentlyPlaying.item);
+        const message = substituteParamsExtended(settings.template, params);
+        setExtensionPrompt(INJECT_ID, message, settings.position, settings.depth, true, settings.role);
+    } catch (error) {
+        console.error('Error fetching currently playing track:', error);
+    }
 }
 
 function getPromptParams(value: Track | Episode) {
@@ -238,7 +285,6 @@ function getPromptParams(value: Track | Episode) {
             const track = value as Track;
             return {
                 song: track.name,
-                track: track.name,
                 artist: track.artists.map(a => a.name)?.join(', '),
                 album: track.album.name,
                 year: track.album.release_date.split('-')[0],
@@ -248,7 +294,6 @@ function getPromptParams(value: Track | Episode) {
             const episode = value as Episode;
             return {
                 song: episode.name,
-                track: episode.name,
                 artist: episode.show.name,
             };
         };
@@ -260,6 +305,7 @@ function getPromptParams(value: Track | Episode) {
     const settings = getSettings();
     addSettingsControls(settings);
     await tryGetClientToken(settings);
+    await refreshTokenIfNeeded(settings);
     await tryReadClientData(settings);
     globalThis.spotify_setCurrentTrack = setCurrentTrack;
     saveSettingsDebounced();
