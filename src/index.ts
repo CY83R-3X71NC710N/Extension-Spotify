@@ -2,12 +2,14 @@ import { SpotifyApi, AccessToken, Track, Episode } from '@spotify/web-api-ts-sdk
 import { sha256, generateRandomString, base64encode } from './util';
 import { InjectionPosition, InjectionRole, VERIFIER_KEY, MODULE_NAME, INJECT_ID, SPOTIFY_SCOPES } from './constants';
 import html from './settings.html';
+import './style.css';
 
 const {
     extensionSettings,
     saveSettingsDebounced,
     setExtensionPrompt,
     substituteParamsExtended,
+    t,
 } = SillyTavern.getContext();
 
 interface ExtensionSettings {
@@ -66,58 +68,66 @@ function addSettingsControls(settings: ExtensionSettings): void {
 
     settingsContainer.appendChild(renderer.content);
 
-    const clientId = document.getElementById('spotify_client_id') as HTMLInputElement;
-    const template = document.getElementById('spotify_template') as HTMLTextAreaElement;
-    const role = document.getElementById('spotify_role') as HTMLSelectElement;
-    const position = Array.from(document.getElementsByName('spotify_position')) as HTMLInputElement[];
-    const depth = document.getElementById('spotify_depth') as HTMLInputElement;
-    const scan = document.getElementById('spotify_scan') as HTMLInputElement;
+    // Setup UI elements
+    const elements = {
+        clientId: document.getElementById('spotify_client_id') as HTMLInputElement,
+        template: document.getElementById('spotify_template') as HTMLTextAreaElement,
+        role: document.getElementById('spotify_role') as HTMLSelectElement,
+        position: Array.from(document.getElementsByName('spotify_position')) as HTMLInputElement[],
+        depth: document.getElementById('spotify_depth') as HTMLInputElement,
+        scan: document.getElementById('spotify_scan') as HTMLInputElement,
+        authButton: document.getElementById('spotify_auth') as HTMLDivElement,
+        logoutButton: document.getElementById('spotify_logout') as HTMLDivElement,
+    };
 
-    clientId.value = settings.clientId;
-    template.value = settings.template;
-    role.value = settings.role.toString();
-    position.forEach((radio) => {
+    // Initialize UI with current settings
+    elements.clientId.value = settings.clientId;
+    elements.template.value = settings.template;
+    elements.role.value = settings.role.toString();
+    elements.position.forEach((radio) => {
         radio.checked = settings.position === parseInt(radio.value);
     });
-    depth.value = settings.depth.toString();
-    scan.checked = settings.scan;
+    elements.depth.value = settings.depth.toString();
+    elements.scan.checked = settings.scan;
 
-    clientId.addEventListener('input', () => {
-        settings.clientId = clientId.value;
-        saveSettingsDebounced();
-    });
-    template.addEventListener('input', () => {
-        settings.template = template.value;
-        saveSettingsDebounced();
-    });
-    role.addEventListener('input', () => {
-        settings.role = parseInt(role.value);
-        saveSettingsDebounced();
-    });
-    position.forEach((radio) => {
-        radio.addEventListener('change', (e) => {
+    // Define a generic handler for simple input changes
+    const handleInputChange = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+        element: T,
+        settingKey: keyof ExtensionSettings,
+        transform?: (value: string | boolean) => any
+    ) => {
+        element.addEventListener('input', () => {
+            const value = element instanceof HTMLInputElement && element.type === 'checkbox'
+                ? element.checked
+                : element.value;
+            settings[settingKey] = transform ? transform(value) : value;
+            saveSettingsDebounced();
+        });
+    };
+
+    // Set up event listeners
+    handleInputChange(elements.clientId, 'clientId');
+    handleInputChange(elements.template, 'template');
+    handleInputChange(elements.role, 'role', value => parseInt(value as string));
+    handleInputChange(elements.depth, 'depth', value => parseInt(value as string));
+    handleInputChange(elements.scan, 'scan');
+
+    // Handle radio buttons separately
+    elements.position.forEach((radio) => {
+        radio.addEventListener('input', (e) => {
             settings.position = parseInt((e.target as HTMLInputElement).value);
             saveSettingsDebounced();
         });
     });
-    depth.addEventListener('input', () => {
-        settings.depth = parseInt(depth.value);
-        saveSettingsDebounced();
-    });
-    scan.addEventListener('change', () => {
-        settings.scan = scan.checked;
-        saveSettingsDebounced();
-    });
 
-    const authButton = document.getElementById('spotify_auth');
-    authButton?.addEventListener('click', () => {
+    // Auth buttons
+    elements.authButton.addEventListener('click', () => {
         authenticateSpotify();
     });
 
-    const logoutButton = document.getElementById('spotify_logout');
-    logoutButton?.addEventListener('click', () => {
+    elements.logoutButton.addEventListener('click', () => {
         settings.clientToken = null;
-        setUserName('[Not logged in]');
+        setUserName(t`[Not logged in]`);
         saveSettingsDebounced();
     });
 }
@@ -133,7 +143,7 @@ async function authenticateSpotify(): Promise<void> {
     const settings = getSettings();
 
     if (!settings.clientId) {
-        toastr.error('Please enter your Spotify Client ID in the settings.');
+        toastr.error(t`Please enter your Spotify Client ID in the settings.`);
         return;
     }
 
@@ -204,16 +214,16 @@ async function tryGetClientToken(settings: ExtensionSettings): Promise<void> {
         saveSettingsDebounced();
 
         console.log('Spotify token received:', token);
-        toastr.success('Successfully authenticated with Spotify!');
+        toastr.success(t`Successfully authenticated with Spotify!`);
     } catch (error) {
         console.error('Error during Spotify authentication:', error);
-        toastr.error('Spotify authentication failed. Please try again.');
+        toastr.error(t`Spotify authentication failed. Please try again.`);
     }
 }
 
 async function tryReadClientData(settings: ExtensionSettings): Promise<void> {
     if (!settings.clientToken || !settings.clientId) {
-        setUserName('[Not logged in]');
+        setUserName(t`[Not logged in]`);
         return;
     }
 
