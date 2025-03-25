@@ -1,11 +1,22 @@
-import { SpotifyApi, AccessToken, Track, Episode } from '@spotify/web-api-ts-sdk';
+import { SpotifyApi, Track, Episode } from '@spotify/web-api-ts-sdk';
 import { sha256, generateRandomString, base64encode } from './util';
-import { InjectionPosition, InjectionRole, VERIFIER_KEY, MODULE_NAME, INJECT_ID, SPOTIFY_SCOPES } from './constants';
+import { InjectionPosition, VERIFIER_KEY, INJECT_ID, SPOTIFY_SCOPES } from './constants';
+import { TOOL_PARAMETERS } from './tools';
+import { getSettings } from './settings';
+import {
+    ControlPlaybackParameters,
+    ExtensionSettings,
+    GetTopTrackParameters,
+    SearchTracksParameters,
+    TimeRange,
+    ToolDefinition,
+    TrackViewModel,
+} from './types';
+
 import html from './settings.html';
 import './style.css';
 
 const {
-    extensionSettings,
     saveSettingsDebounced,
     setExtensionPrompt,
     substituteParamsExtended,
@@ -13,69 +24,6 @@ const {
     unregisterFunctionTool,
     t,
 } = SillyTavern.getContext();
-
-interface ExtensionSettings {
-    clientId: string;
-    clientToken: AccessToken | null;
-    template: string;
-    position: InjectionPosition;
-    role: InjectionRole;
-    depth: number;
-    scan: boolean;
-    // Tools
-    searchTracks: boolean;
-    controlPlayback: boolean;
-    getTopTracks: boolean;
-    getPlaylists: boolean;
-    [key: string]: any; // Allow additional properties
-}
-
-interface GlobalSettings {
-    [MODULE_NAME]: ExtensionSettings;
-}
-
-interface ToolDefinition {
-    name: string;
-    displayName: string;
-    description: string;
-    parameters: object;
-    action: (...args: any[]) => Promise<any>;
-    shouldRegister: () => Promise<boolean>;
-}
-
-// Define default settings
-const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
-    clientId: '',
-    clientToken: null,
-    template: '[{{user}} is listening to {{song}} by {{artist}} on Spotify]',
-    position: InjectionPosition.InChat,
-    role: InjectionRole.System,
-    depth: 1,
-    scan: true,
-    searchTracks: true,
-    controlPlayback: true,
-    getTopTracks: true,
-    getPlaylists: true,
-});
-
-// Define a function to get or initialize settings
-function getSettings(): ExtensionSettings {
-    const globalSettings = extensionSettings as {} as GlobalSettings;
-
-    // Initialize settings if they don't exist
-    if (!globalSettings[MODULE_NAME]) {
-        globalSettings[MODULE_NAME] = structuredClone(defaultSettings);
-    }
-
-    // Ensure all default keys exist (helpful after updates)
-    for (const key in defaultSettings) {
-        if (globalSettings[MODULE_NAME][key] === undefined) {
-            globalSettings[MODULE_NAME][key] = defaultSettings[key];
-        }
-    }
-
-    return globalSettings[MODULE_NAME];
-}
 
 function addSettingsControls(settings: ExtensionSettings): void {
     const settingsContainer = document.getElementById('spotify_container') ?? document.getElementById('extensions_settings2');
@@ -342,7 +290,7 @@ async function setCurrentTrack(): Promise<void> {
     }
 }
 
-function getPromptParams(value: Track | Episode) {
+function getPromptParams(value: Track | Episode): Record<string, string> {
     if (!value) {
         return {};
     }
@@ -367,7 +315,7 @@ function getPromptParams(value: Track | Episode) {
     return {};
 }
 
-function trackToViewModel(track: Track) {
+function trackToViewModel(track: Track): TrackViewModel {
     return {
         uri: track.uri,
         name: track.name,
@@ -377,26 +325,16 @@ function trackToViewModel(track: Track) {
 }
 
 export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
-    'searchTracks': {
+    searchTracks: {
         name: 'SpotifySearchTracks',
         displayName: 'Spotify: Search Tracks',
         description: 'Search for tracks on Spotify. Call when you need to find a URI for a track.',
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: {
-                query: {
-                    type: 'string',
-                    description: 'The search query for the track.',
-                },
-            },
-            required: ['query'],
-        },
+        parameters: TOOL_PARAMETERS.searchTracks,
         shouldRegister: () => {
             const settings = getSettings();
             return Promise.resolve(!!(settings.clientToken && settings.clientId));
         },
-        action: async ({ query }: { query: string }) => {
+        action: async ({ query }: SearchTracksParameters) => {
             try {
                 const settings = getSettings();
                 if (!settings.clientToken || !settings.clientId) {
@@ -413,30 +351,16 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
             }
         },
     },
-    'controlPlayback': {
+    controlPlayback: {
         name: 'SpotifyControlPlayback',
         displayName: 'Spotify: Control Playback',
         description: 'Control playback on Spotify. Call when the user wants to play, pause, skip or seek a track.',
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: {
-                action: {
-                    type: 'string',
-                    description: 'The action to perform on the track. Possible values are: play, pause, resume, next, previous.',
-                },
-                uri: {
-                    type: 'string',
-                    description: 'The URI of the track to perform the action on. Required for play action.',
-                },
-            },
-            required: ['action'],
-        },
+        parameters: TOOL_PARAMETERS.controlPlayback,
         shouldRegister: () => {
             const settings = getSettings();
             return Promise.resolve(!!(settings.clientToken && settings.clientId));
         },
-        action: async ({ action, uri }: { action: string, uri?: string }) => {
+        action: async ({ action, uri }: ControlPlaybackParameters) => {
             try {
                 const settings = getSettings();
                 if (!settings.clientToken || !settings.clientId) {
@@ -493,26 +417,16 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
             }
         },
     },
-    'getTopTracks': {
+    getTopTracks: {
         name: 'SpotifyGetTopTracks',
         displayName: 'Spotify: Get Top Tracks',
         description: 'Gets a list of user\'s top tracks. Call when the user wants to see their top tracks, play a favorite track, etc.',
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: {
-                timeRange: {
-                    type: 'string',
-                    description: 'The time range for the top tracks. Possible values are: short_term, medium_term, long_term.',
-                },
-            },
-            required: [],
-        },
+        parameters: TOOL_PARAMETERS.getTopTracks,
         shouldRegister: () => {
             const settings = getSettings();
             return Promise.resolve(!!(settings.clientToken && settings.clientId));
         },
-        action: async ({ timeRange }: { timeRange: string }) => {
+        action: async ({ timeRange }: GetTopTrackParameters) => {
             try {
                 const settings = getSettings();
                 if (!settings.clientToken || !settings.clientId) {
@@ -523,7 +437,7 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                 if (!['short_term', 'medium_term', 'long_term'].includes(timeRange)) {
                     timeRange = 'short_term';
                 }
-                const result = await api.currentUser.topItems('tracks', timeRange as 'short_term' | 'medium_term' | 'long_term');
+                const result = await api.currentUser.topItems('tracks', timeRange as TimeRange);
                 const topTracks = result.items.map(trackToViewModel);
                 return topTracks;
             } catch (error) {
@@ -532,16 +446,11 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
             }
         },
     },
-    'getPlaylists': {
+    getPlaylists: {
         name: 'SpotifyGetPlaylists',
         displayName: 'Spotify: Get Playlists',
         description: 'Gets a list of user\'s playlists. Call when the user wants to see their playlists.',
-        parameters: {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: {},
-            required: [],
-        },
+        parameters: TOOL_PARAMETERS.getPlaylists,
         shouldRegister: () => {
             const settings = getSettings();
             return Promise.resolve(!!(settings.clientToken && settings.clientId));
