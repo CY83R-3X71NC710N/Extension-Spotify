@@ -186,7 +186,6 @@ function trackToViewModel(track: Track): TrackViewModel {
         album: track.album.name,
         album_uri: track.album.uri,
         release_date: track.album.release_date,
-        genres: track.album.genres,
     };
 }
 

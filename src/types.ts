@@ -6,7 +6,6 @@ export interface TrackViewModel {
     album_uri: string;
     album: string;
     release_date: string;
-    genres: string[];
 }
 
 export interface PlaylistViewModel {
