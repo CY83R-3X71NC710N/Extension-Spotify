@@ -127,7 +127,6 @@ export async function refreshTokenIfNeeded(settings: ExtensionSettings): Promise
     }
 }
 
-
 export function setUserName(name: string): void {
     const userName = document.getElementById('spotify_user_name') as HTMLSpanElement;
     if (userName) {
