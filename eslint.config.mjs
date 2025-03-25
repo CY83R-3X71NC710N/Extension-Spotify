@@ -11,6 +11,7 @@ export default defineConfig([
     {
         ignores: ['**/node_modules/**', '**/dist/**'],
         rules: {
+            'prefer-const': 'error',
             'no-unused-vars': ['error', { args: 'none' }],
             'no-control-regex': 'off',
             'no-constant-condition': ['error', { checkLoops: false }],
