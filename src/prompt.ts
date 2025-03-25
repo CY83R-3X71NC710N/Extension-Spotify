@@ -14,7 +14,7 @@ export async function setCurrentTrack(): Promise<void> {
     resetInject();
 
     const settings = getSettings();
-    if (!settings.clientToken || !settings.clientId || !settings.template) {
+    if (!settings.clientToken || !settings.clientId || !settings.template || settings.position === InjectionPosition.None) {
         return;
     }
 
