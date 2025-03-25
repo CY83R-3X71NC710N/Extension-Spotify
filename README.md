@@ -1,6 +1,6 @@
 # Spotify Extension
 
-Provides information about the currently playing song on Spotify in SillyTavern prompts.
+Provides function tools and information about the currently playing song on Spotify in SillyTavern prompts.
 
 ## Installation
 
@@ -73,8 +73,11 @@ The extension provides [function tools](https://docs.sillytavern.app/for-contrib
 
 1. "Search Tracks": Search for tracks by name, artist or album.
 2. "Control Playback": Play a track, pause, resume, skip to the next track or the previous track.
-3. "Get Top Tracks": Get top tracks of the user.
-4. "Get Playlists": Get playlists of the user.
+3. "Get Current Track": Get a track that is currently playing.
+4. "Get Top Tracks": Get top tracks of the user.
+5. "Get Recent Tracks": Get recently played tracks.
+6. "Get User Playlists": Get playlists of the user.
+7. "Get Playlist Tracks": Get a list of tracks from a playlist.
 
 ## License
 
