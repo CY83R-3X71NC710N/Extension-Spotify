@@ -15,7 +15,7 @@ export interface ExtensionSettings {
     getTopTracks: boolean;
     getPlaylists: boolean;
     // Allow additional properties
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface GlobalSettings {
@@ -38,7 +38,7 @@ export const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
 
 export function getSettings(): ExtensionSettings {
     const context = SillyTavern.getContext();
-    const globalSettings = context.extensionSettings as {} as GlobalSettings;
+    const globalSettings = context.extensionSettings as object as GlobalSettings;
 
     // Initialize settings if they don't exist
     if (!globalSettings[MODULE_NAME]) {

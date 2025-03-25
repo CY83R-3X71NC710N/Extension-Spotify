@@ -64,7 +64,7 @@ function addSettingsControls(settings: ExtensionSettings): void {
     const handleInputChange = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
         element: T,
         settingKey: keyof ExtensionSettings,
-        transform?: (value: string | boolean) => any,
+        transform?: (value: string | boolean) => number | string | boolean,
         callback?: () => void,
     ) => {
         element.addEventListener('input', () => {
@@ -385,6 +385,7 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                             return 'No active device found.';
                         }
                         await api.player.startResumePlayback(activeDevice.id);
+                        return 'Resumed playback on device: ' + activeDevice?.name;
                     }
                     case 'next': {
                         if (!activeDevice?.id) {

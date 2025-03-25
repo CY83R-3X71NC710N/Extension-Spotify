@@ -3,7 +3,7 @@ export interface ToolDefinition {
     displayName: string;
     description: string;
     parameters: object;
-    action: (...args: any[]) => Promise<any>;
+    action: (...args: never[]) => Promise<unknown>;
     shouldRegister: () => Promise<boolean>;
 }
 
@@ -20,7 +20,7 @@ export interface GetTopTrackParameters {
     timeRange: string;
 }
 
-export const TOOL_PARAMETERS: { [key: string]: Readonly<Record<string, any>> } = {
+export const TOOL_PARAMETERS: { [key: string]: Readonly<Record<string, unknown>> } = {
     searchTracks: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',

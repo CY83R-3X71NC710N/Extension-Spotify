@@ -9,10 +9,12 @@ export default defineConfig([
     { files: ['**/*.{js,mjs,cjs,ts}'], plugins: { js }, extends: ['js/recommended'] },
     tseslint.configs.recommended,
     {
-        ignores: ['**/node_modules/**', '**/dist/**'],
+        ignores: ['**/dist/**', '**/node_modules/**'],
+    },
+    {
         rules: {
             'prefer-const': 'error',
-            'no-unused-vars': ['error', { args: 'none' }],
+            '@typescript-eslint/no-unused-vars': ['error', { args: 'none' }],
             'no-control-regex': 'off',
             'no-constant-condition': ['error', { checkLoops: false }],
             'require-yield': 'off',
