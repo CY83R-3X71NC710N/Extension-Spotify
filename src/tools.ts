@@ -2,7 +2,7 @@ import { SpotifyApi, Track, SimplifiedPlaylist } from '@spotify/web-api-ts-sdk';
 import { getSettings } from './settings';
 import { refreshTokenIfNeeded } from './auth';
 import { TrackViewModel, PlaylistViewModel, TimeRange } from './types';
-import { getIdFromSpotifyUri, isSpotifyUri, laxJsonConfig } from './util';
+import { getIdFromSpotifyUri, getTypeFromSpotifyUri, isSpotifyUri, laxJsonConfig } from './util';
 
 type SpotifyTool = 'searchTracks' | 'controlPlayback' | 'getCurrentTrack' | 'getTopTracks' | 'getRecentTracks' | 'getPlaylists' | 'getPlaylistTracks';
 type ToolParametersSchema = Readonly<Record<string, unknown>>;
@@ -53,11 +53,11 @@ const TOOL_PARAMETERS: Record<SpotifyTool, ToolParametersSchema> = {
         properties: {
             action: {
                 type: 'string',
-                description: 'The action to perform on the track. Possible values are: play, pause, resume, next, previous.',
+                description: 'The action to perform on the track. Possible values are: play, queue, pause, resume, next, previous.',
             },
             uri: {
                 type: 'string',
-                description: '"play" action only. The URI of the track to perform the action on. Optional if playing a playlist or album.',
+                description: '"play" or "queue" actions only. The URI of the track to perform the action on. Optional if playing a playlist or album.',
             },
             contextUri: {
                 type: 'string',
@@ -230,7 +230,7 @@ async function controlPlaybackCallback({ action, uri, contextUri }: ControlPlayb
         const device = await api.player.getAvailableDevices();
         const activeDevice = device.devices.find(d => d.is_active);
         if (!activeDevice?.id) {
-            return 'No active device found.';
+            return 'No active device found. Start a Spotify client on a device.';
         }
         switch (action) {
             case 'play': {
@@ -256,6 +256,13 @@ async function controlPlaybackCallback({ action, uri, contextUri }: ControlPlayb
             case 'previous': {
                 await api.player.skipToPrevious(activeDevice.id);
                 return `Skipped to previous track on device: ${activeDevice?.name}`;
+            }
+            case 'queue': {
+                if (!uri) {
+                    return 'URI is required for queue action.';
+                }
+                await api.player.addItemToPlaybackQueue(uri, activeDevice.id);
+                return `Track queued on device: ${activeDevice?.name}`;
             }
             default:
                 return 'Unknown action: ' + action;
