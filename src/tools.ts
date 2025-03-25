@@ -2,6 +2,7 @@ import { SpotifyApi, Track, SimplifiedPlaylist } from '@spotify/web-api-ts-sdk';
 import { getSettings } from './settings';
 import { refreshTokenIfNeeded } from './auth';
 import { TrackViewModel, PlaylistViewModel, TimeRange } from './types';
+import { getIdFromSpotifyUri, isSpotifyUri, laxJsonConfig } from './util';
 
 type SpotifyTool = 'searchTracks' | 'controlPlayback' | 'getCurrentTrack' | 'getTopTracks' | 'getRecentTracks' | 'getPlaylists' | 'getPlaylistTracks';
 type ToolParametersSchema = Readonly<Record<string, unknown>>;
@@ -226,48 +227,36 @@ async function controlPlaybackCallback({ action, uri, contextUri }: ControlPlayb
             return 'User is not authenticated with Spotify.';
         }
         await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken, laxJsonConfig);
         const device = await api.player.getAvailableDevices();
         const activeDevice = device.devices.find(d => d.is_active);
+        if (!activeDevice?.id) {
+            return 'No active device found.';
+        }
         switch (action) {
             case 'play': {
                 if (!uri && !contextUri) {
                     return 'URI or context URI is required for play action.';
                 }
-                if (!activeDevice?.id) {
-                    return 'No active device found.';
-                }
                 const uris = uri ? [uri] : void 0;
                 await api.player.startResumePlayback(activeDevice.id, contextUri, uris);
-                return 'Playing track: ' + uri;
+                return `Playback started on device: ${activeDevice?.name}`;
             }
             case 'pause': {
-                if (!activeDevice?.id) {
-                    return 'No active device found.';
-                }
                 await api.player.pausePlayback(activeDevice.id);
-                return 'Paused playback on device: ' + activeDevice?.name;
+                return `Paused playback on device: ${activeDevice?.name}`;
             }
             case 'resume': {
-                if (!activeDevice?.id) {
-                    return 'No active device found.';
-                }
                 await api.player.startResumePlayback(activeDevice.id);
-                return 'Resumed playback on device: ' + activeDevice?.name;
+                return `Resumed playback on device: ${activeDevice?.name}`;
             }
             case 'next': {
-                if (!activeDevice?.id) {
-                    return 'No active device found.';
-                }
                 await api.player.skipToNext(activeDevice.id);
-                return 'Skipped to next track on device: ' + activeDevice?.name;
+                return `Skipped to next track on device: ${activeDevice?.name}`;
             }
             case 'previous': {
-                if (!activeDevice?.id) {
-                    return 'No active device found.';
-                }
                 await api.player.skipToPrevious(activeDevice.id);
-                return 'Skipped to previous track on device: ' + activeDevice?.name;
+                return `Skipped to previous track on device: ${activeDevice?.name}`;
             }
             default:
                 return 'Unknown action: ' + action;
@@ -311,8 +300,7 @@ async function getTopTracksCallback({ timeRange }: GetTopTrackParameters): Promi
             timeRange = 'short_term';
         }
         const result = await api.currentUser.topItems('tracks', timeRange as TimeRange);
-        const topTracks = result.items.map(trackToViewModel);
-        return topTracks;
+        return result.items.map(trackToViewModel);
     } catch (error) {
         console.error('Error fetching top tracks:', error);
         return 'Error fetching top tracks. See console for details.';
@@ -328,8 +316,7 @@ async function getRecentTracksCallback(): Promise<string | TrackViewModel[]> {
         await refreshTokenIfNeeded(settings);
         const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
         const result = await api.player.getRecentlyPlayedTracks();
-        const tracks = result.items.map(i => trackToViewModel(i.track));
-        return tracks;
+        return result.items.map(i => trackToViewModel(i.track));
     }
     catch (error) {
         console.error('Error fetching recent tracks:', error);
@@ -346,8 +333,7 @@ async function getPlaylistsCallback(): Promise<string | PlaylistViewModel[]> {
         await refreshTokenIfNeeded(settings);
         const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
         const result = await api.currentUser.playlists.playlists();
-        const playlists = result.items.map(playlistToViewModel);
-        return playlists;
+        return result.items.map(playlistToViewModel);
     } catch (error) {
         console.error('Error fetching playlists:', error);
         return 'Error fetching playlists. See console for details.';
@@ -362,9 +348,12 @@ async function getPlaylistTracksCallback({ playlistUri }: GetPlaylistTracksParam
         }
         await refreshTokenIfNeeded(settings);
         const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const result = await api.playlists.getPlaylistItems(playlistUri);
-        const tracks = result.items.map(i => trackToViewModel(i.track));
-        return tracks;
+        const playlistId = isSpotifyUri(playlistUri) ? getIdFromSpotifyUri(playlistUri) : playlistUri;
+        if (!playlistId) {
+            return 'Invalid playlist URI.';
+        }
+        const result = await api.playlists.getPlaylistItems(playlistId);
+        return result.items.map(i => trackToViewModel(i.track));
     } catch (error) {
         console.error('Error fetching playlist tracks:', error);
         return 'Error fetching playlist tracks. See console for details.';
