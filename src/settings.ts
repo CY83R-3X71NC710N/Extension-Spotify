@@ -1,5 +1,5 @@
-import { AccessToken } from "@spotify/web-api-ts-sdk";
-import { InjectionPosition, InjectionRole, MODULE_NAME } from "./constants";
+import { AccessToken } from '@spotify/web-api-ts-sdk';
+import { InjectionPosition, InjectionRole, MODULE_NAME } from './constants';
 
 export interface ExtensionSettings {
     clientId: string;

@@ -58,7 +58,7 @@ function addSettingsControls(settings: ExtensionSettings): void {
     elements.tools.searchTracks.checked = settings.searchTracks;
     elements.tools.controlPlayback.checked = settings.controlPlayback;
     elements.tools.getTopTracks.checked = settings.getTopTracks;
-    elements.tools.getPlaylists.checked = settings.getPlaylists
+    elements.tools.getPlaylists.checked = settings.getPlaylists;
 
     // Define a generic handler for simple input changes
     const handleInputChange = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -181,7 +181,7 @@ async function tryGetClientToken(settings: ExtensionSettings): Promise<void> {
             code_verifier: codeVerifier,
             code,
         }),
-    }
+    };
 
     try {
         const body = await fetch(url, payload);
