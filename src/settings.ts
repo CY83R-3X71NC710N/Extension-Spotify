@@ -1,5 +1,26 @@
+import { AccessToken } from "@spotify/web-api-ts-sdk";
 import { InjectionPosition, InjectionRole, MODULE_NAME } from "./constants";
-import { ExtensionSettings, GlobalSettings } from "./types";
+
+export interface ExtensionSettings {
+    clientId: string;
+    clientToken: AccessToken | null;
+    template: string;
+    position: InjectionPosition;
+    role: InjectionRole;
+    depth: number;
+    scan: boolean;
+    // Tools
+    searchTracks: boolean;
+    controlPlayback: boolean;
+    getTopTracks: boolean;
+    getPlaylists: boolean;
+    // Allow additional properties
+    [key: string]: any;
+}
+
+export interface GlobalSettings {
+    [MODULE_NAME]: ExtensionSettings;
+}
 
 export const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
     clientId: '',

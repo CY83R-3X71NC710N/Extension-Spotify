@@ -1,17 +1,9 @@
 import { SpotifyApi, Track, Episode } from '@spotify/web-api-ts-sdk';
 import { sha256, generateRandomString, base64encode } from './util';
 import { InjectionPosition, VERIFIER_KEY, INJECT_ID, SPOTIFY_SCOPES } from './constants';
-import { TOOL_PARAMETERS } from './tools';
-import { getSettings } from './settings';
-import {
-    ControlPlaybackParameters,
-    ExtensionSettings,
-    GetTopTrackParameters,
-    SearchTracksParameters,
-    TimeRange,
-    ToolDefinition,
-    TrackViewModel,
-} from './types';
+import { ControlPlaybackParameters, GetTopTrackParameters, SearchTracksParameters, TOOL_PARAMETERS, ToolDefinition } from './tools';
+import { ExtensionSettings, getSettings } from './settings';
+import { TimeRange, TrackViewModel } from './types';
 
 import html from './settings.html';
 import './style.css';

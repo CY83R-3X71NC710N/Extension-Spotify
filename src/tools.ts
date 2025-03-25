@@ -1,3 +1,25 @@
+export interface ToolDefinition {
+    name: string;
+    displayName: string;
+    description: string;
+    parameters: object;
+    action: (...args: any[]) => Promise<any>;
+    shouldRegister: () => Promise<boolean>;
+}
+
+export interface SearchTracksParameters {
+    query: string;
+}
+
+export interface ControlPlaybackParameters {
+    action: string;
+    uri?: string;
+}
+
+export interface GetTopTrackParameters {
+    timeRange: string;
+}
+
 export const TOOL_PARAMETERS: { [key: string]: Readonly<Record<string, any>> } = {
     searchTracks: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
