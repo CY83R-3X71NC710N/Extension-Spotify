@@ -9,4 +9,10 @@ export interface TrackViewModel {
     genres: string[];
 }
 
+export interface PlaylistViewModel {
+    uri: string;
+    name: string;
+    description: string;
+}
+
 export type TimeRange = 'short_term' | 'medium_term' | 'long_term';
