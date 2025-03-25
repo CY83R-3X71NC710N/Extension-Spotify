@@ -12,8 +12,11 @@ export interface ExtensionSettings {
     // Tools
     searchTracks: boolean;
     controlPlayback: boolean;
+    getCurrentTrack: boolean;
     getTopTracks: boolean;
+    getRecentTracks: boolean;
     getPlaylists: boolean;
+    getPlaylistTracks: boolean;
     // Allow additional properties
     [key: string]: unknown;
 }
@@ -32,8 +35,11 @@ export const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
     scan: true,
     searchTracks: true,
     controlPlayback: true,
+    getCurrentTrack: true,
     getTopTracks: true,
+    getRecentTracks: true,
     getPlaylists: true,
+    getPlaylistTracks: true,
 });
 
 export function getSettings(): ExtensionSettings {

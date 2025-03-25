@@ -1,7 +1,7 @@
 import { SpotifyApi, Track, Episode } from '@spotify/web-api-ts-sdk';
 import { sha256, generateRandomString, base64encode } from './util';
 import { InjectionPosition, VERIFIER_KEY, INJECT_ID, SPOTIFY_SCOPES } from './constants';
-import { ControlPlaybackParameters, GetTopTrackParameters, SearchTracksParameters, TOOL_PARAMETERS, ToolDefinition } from './tools';
+import { ControlPlaybackParameters, GetPlaylistTracksParameters, GetTopTrackParameters, SearchTracksParameters, TOOL_PARAMETERS, ToolDefinition } from './tools';
 import { ExtensionSettings, getSettings } from './settings';
 import { TimeRange, TrackViewModel } from './types';
 
@@ -41,8 +41,11 @@ function addSettingsControls(settings: ExtensionSettings): void {
         tools: {
             searchTracks: document.getElementById('spotify_tool_search_tracks') as HTMLInputElement,
             controlPlayback: document.getElementById('spotify_tool_control_playback') as HTMLInputElement,
+            getCurrentTrack: document.getElementById('spotify_tool_get_current_track') as HTMLInputElement,
             getTopTracks: document.getElementById('spotify_tool_get_top_tracks') as HTMLInputElement,
+            getRecentTracks: document.getElementById('spotify_tool_get_recent_tracks') as HTMLInputElement,
             getPlaylists: document.getElementById('spotify_tool_get_playlists') as HTMLInputElement,
+            getPlaylistTracks: document.getElementById('spotify_tool_get_playlist_tracks') as HTMLInputElement,
         },
     };
 
@@ -57,8 +60,11 @@ function addSettingsControls(settings: ExtensionSettings): void {
     elements.scan.checked = settings.scan;
     elements.tools.searchTracks.checked = settings.searchTracks;
     elements.tools.controlPlayback.checked = settings.controlPlayback;
+    elements.tools.getCurrentTrack.checked = settings.getCurrentTrack;
     elements.tools.getTopTracks.checked = settings.getTopTracks;
+    elements.tools.getRecentTracks.checked = settings.getRecentTracks;
     elements.tools.getPlaylists.checked = settings.getPlaylists;
+    elements.tools.getPlaylistTracks.checked = settings.getPlaylistTracks;
 
     // Define a generic handler for simple input changes
     const handleInputChange = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -87,8 +93,11 @@ function addSettingsControls(settings: ExtensionSettings): void {
     handleInputChange(elements.scan, 'scan', value => value, resetInject);
     handleInputChange(elements.tools.searchTracks, 'searchTracks', value => value, syncFunctionTools);
     handleInputChange(elements.tools.controlPlayback, 'controlPlayback', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getCurrentTrack, 'getCurrentTrack', value => value, syncFunctionTools);
     handleInputChange(elements.tools.getTopTracks, 'getTopTracks', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getRecentTracks, 'getRecentTracks', value => value, syncFunctionTools);
     handleInputChange(elements.tools.getPlaylists, 'getPlaylists', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getPlaylistTracks, 'getPlaylistTracks', value => value, syncFunctionTools);
 
     // Handle radio buttons separately
     elements.position.forEach((radio) => {
@@ -311,9 +320,18 @@ function trackToViewModel(track: Track): TrackViewModel {
     return {
         uri: track.uri,
         name: track.name,
-        artist: track.artists.map(a => a.name)?.join(', '),
+        artist: track.artists.length === 1 ? track.artists[0].name : track.artists.map(a => a.name),
+        artist_uri: track.artists.length === 1 ? track.artists[0].uri : track.artists.map(a => a.uri),
         album: track.album.name,
+        album_uri: track.album.uri,
+        release_date: track.album.release_date,
+        genres: track.album.genres,
     };
+}
+
+async function isToolValid(): Promise<boolean> {
+    const settings = getSettings();
+    return !!(settings.clientToken && settings.clientId);
 }
 
 export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
@@ -322,10 +340,7 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
         displayName: 'Spotify: Search Tracks',
         description: 'Search for tracks on Spotify. Call when you need to find a URI for a track.',
         parameters: TOOL_PARAMETERS.searchTracks,
-        shouldRegister: () => {
-            const settings = getSettings();
-            return Promise.resolve(!!(settings.clientToken && settings.clientId));
-        },
+        shouldRegister: isToolValid,
         action: async ({ query }: SearchTracksParameters) => {
             try {
                 const settings = getSettings();
@@ -339,7 +354,7 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                 return tracks;
             } catch (error) {
                 console.error('Error searching tracks:', error);
-                return 'Error searching tracks.';
+                return 'Error searching tracks. See console for details.';
             }
         },
     },
@@ -348,11 +363,8 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
         displayName: 'Spotify: Control Playback',
         description: 'Control playback on Spotify. Call when the user wants to play, pause, skip or seek a track.',
         parameters: TOOL_PARAMETERS.controlPlayback,
-        shouldRegister: () => {
-            const settings = getSettings();
-            return Promise.resolve(!!(settings.clientToken && settings.clientId));
-        },
-        action: async ({ action, uri }: ControlPlaybackParameters) => {
+        shouldRegister: isToolValid,
+        action: async ({ action, uri, contextUri }: ControlPlaybackParameters) => {
             try {
                 const settings = getSettings();
                 if (!settings.clientToken || !settings.clientId) {
@@ -364,13 +376,14 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                 const activeDevice = device.devices.find(d => d.is_active);
                 switch (action) {
                     case 'play': {
-                        if (!uri) {
-                            return 'URI is required for play action.';
+                        if (!uri && !contextUri) {
+                            return 'URI or context URI is required for play action.';
                         }
                         if (!activeDevice?.id) {
                             return 'No active device found.';
                         }
-                        await api.player.startResumePlayback(activeDevice.id, void 0, [uri]);
+                        const uris = uri ? [uri] : void 0;
+                        await api.player.startResumePlayback(activeDevice.id, contextUri, uris);
                         return 'Playing track: ' + uri;
                     }
                     case 'pause': {
@@ -406,19 +419,43 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                 }
             } catch (error) {
                 console.error('Error controlling playback:', error);
-                return 'Error controlling playback.';
+                return 'Error controlling playback. See console for details.';
+            }
+        },
+    },
+    getCurrentTrack: {
+        name: 'SpotifyGetCurrentTrack',
+        displayName: 'Spotify: Get Current Track',
+        description: 'Gets the current track playing on Spotify. Call when you need to display the current track.',
+        parameters: TOOL_PARAMETERS.getCurrentTrack,
+        shouldRegister: isToolValid,
+        action: async () => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                const currentlyPlaying = await api.player.getCurrentlyPlayingTrack();
+                const track = currentlyPlaying.item.type === 'track' ? currentlyPlaying.item as Track : null;
+                if (!track) {
+                    return 'No track currently playing.';
+                }
+                return trackToViewModel(track);
+            }
+            catch (error) {
+                console.error('Error fetching current track:', error);
+                return 'Error fetching current track. See console for details.';
             }
         },
     },
     getTopTracks: {
         name: 'SpotifyGetTopTracks',
         displayName: 'Spotify: Get Top Tracks',
-        description: 'Gets a list of user\'s top tracks. Call when the user wants to see their top tracks, play a favorite track, etc.',
+        description: 'Gets a list of user\'s top tracks. Call when the user wants to see their top tracks, play a favorite track, asks for recommendations, etc.',
         parameters: TOOL_PARAMETERS.getTopTracks,
-        shouldRegister: () => {
-            const settings = getSettings();
-            return Promise.resolve(!!(settings.clientToken && settings.clientId));
-        },
+        shouldRegister: isToolValid,
         action: async ({ timeRange }: GetTopTrackParameters) => {
             try {
                 const settings = getSettings();
@@ -435,7 +472,31 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                 return topTracks;
             } catch (error) {
                 console.error('Error fetching top tracks:', error);
-                return 'Error fetching top tracks.';
+                return 'Error fetching top tracks. See console for details.';
+            }
+        },
+    },
+    getRecentTracks: {
+        name: 'SpotifyGetRecentTracks',
+        displayName: 'Spotify: Get Recent Tracks',
+        description: 'Gets a list of user\'s recently played tracks. Call when the user wants to see their recent tracks.',
+        parameters: TOOL_PARAMETERS.getRecentTracks,
+        shouldRegister: isToolValid,
+        action: async () => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                const result = await api.player.getRecentlyPlayedTracks();
+                const tracks = result.items.map(i => trackToViewModel(i.track));
+                return tracks;
+            }
+            catch (error) {
+                console.error('Error fetching recent tracks:', error);
+                return 'Error fetching recent tracks. See console for details.';
             }
         },
     },
@@ -444,10 +505,7 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
         displayName: 'Spotify: Get Playlists',
         description: 'Gets a list of user\'s playlists. Call when the user wants to see their playlists.',
         parameters: TOOL_PARAMETERS.getPlaylists,
-        shouldRegister: () => {
-            const settings = getSettings();
-            return Promise.resolve(!!(settings.clientToken && settings.clientId));
-        },
+        shouldRegister: isToolValid,
         action: async () => {
             try {
                 const settings = getSettings();
@@ -461,7 +519,30 @@ export const TOOL_DEFINITIONS: { [key: string]: ToolDefinition } = {
                 return playlists;
             } catch (error) {
                 console.error('Error fetching playlists:', error);
-                return 'Error fetching playlists.';
+                return 'Error fetching playlists. See console for details.';
+            }
+        },
+    },
+    getPlaylistTracks: {
+        name: 'SpotifyGetPlaylistTracks',
+        displayName: 'Spotify: Get Playlist Tracks',
+        description: 'Gets a list of tracks in a playlist. Call when you need to see the tracks in a playlist.',
+        parameters: TOOL_PARAMETERS.getPlaylistTracks,
+        shouldRegister: isToolValid,
+        action: async ({ playlistUri }: GetPlaylistTracksParameters) => {
+            try {
+                const settings = getSettings();
+                if (!settings.clientToken || !settings.clientId) {
+                    return 'User is not authenticated with Spotify.';
+                }
+                await refreshTokenIfNeeded(settings);
+                const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
+                const result = await api.playlists.getPlaylistItems(playlistUri);
+                const tracks = result.items.map(i => trackToViewModel(i.track));
+                return tracks;
+            } catch (error) {
+                console.error('Error fetching playlist tracks:', error);
+                return 'Error fetching playlist tracks. See console for details.';
             }
         },
     },
