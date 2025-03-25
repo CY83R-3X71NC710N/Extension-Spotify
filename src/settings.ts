@@ -1,13 +1,13 @@
 import { AccessToken } from '@spotify/web-api-ts-sdk';
 import { InjectionPosition, InjectionRole, MODULE_NAME } from './constants';
 import { authenticateSpotify, setUserName } from './auth';
-import { syncFunctionTools } from './tools';
+import { syncFunctionTools, SpotifyTool } from './tools';
 import { resetInject } from './prompt';
 import html from './settings.html';
 
 const { t, saveSettingsDebounced } = SillyTavern.getContext();
 
-export interface ExtensionSettings {
+interface ExtensionSettingsBase {
     clientId: string;
     clientToken: AccessToken | null;
     template: string;
@@ -15,23 +15,21 @@ export interface ExtensionSettings {
     role: InjectionRole;
     depth: number;
     scan: boolean;
-    // Tools
-    searchTracks: boolean;
-    controlPlayback: boolean;
-    getCurrentTrack: boolean;
-    getTopTracks: boolean;
-    getRecentTracks: boolean;
-    getPlaylists: boolean;
-    getPlaylistTracks: boolean;
     // Allow additional properties
     [key: string]: unknown;
 }
 
-export interface GlobalSettings {
+type SpotifyToolSettings = {
+    [key in SpotifyTool]: boolean;
+};
+
+export type ExtensionSettings = ExtensionSettingsBase & SpotifyToolSettings;
+
+interface GlobalSettings {
     [MODULE_NAME]: ExtensionSettings;
 }
 
-export const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
+const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
     clientId: '',
     clientToken: null,
     template: '[{{user}} is listening to {{song}} by {{artist}} on Spotify]',
@@ -40,12 +38,14 @@ export const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
     depth: 1,
     scan: true,
     searchTracks: true,
-    controlPlayback: true,
+    controlPlayback: false,
+    playItem: true,
+    queueTrack: false,
     getCurrentTrack: true,
-    getTopTracks: true,
-    getRecentTracks: true,
-    getPlaylists: true,
-    getPlaylistTracks: true,
+    getTopTracks: false,
+    getRecentTracks: false,
+    getPlaylists: false,
+    getPlaylistTracks: false,
 });
 
 export function getSettings(): ExtensionSettings {
@@ -92,6 +92,8 @@ export function addSettingsControls(settings: ExtensionSettings): void {
         tools: {
             searchTracks: document.getElementById('spotify_tool_search_tracks') as HTMLInputElement,
             controlPlayback: document.getElementById('spotify_tool_control_playback') as HTMLInputElement,
+            playItem: document.getElementById('spotify_tool_play_item') as HTMLInputElement,
+            queueTrack: document.getElementById('spotify_tool_queue_track') as HTMLInputElement,
             getCurrentTrack: document.getElementById('spotify_tool_get_current_track') as HTMLInputElement,
             getTopTracks: document.getElementById('spotify_tool_get_top_tracks') as HTMLInputElement,
             getRecentTracks: document.getElementById('spotify_tool_get_recent_tracks') as HTMLInputElement,
@@ -111,6 +113,8 @@ export function addSettingsControls(settings: ExtensionSettings): void {
     elements.scan.checked = settings.scan;
     elements.tools.searchTracks.checked = settings.searchTracks;
     elements.tools.controlPlayback.checked = settings.controlPlayback;
+    elements.tools.playItem.checked = settings.playItem;
+    elements.tools.queueTrack.checked = settings.queueTrack;
     elements.tools.getCurrentTrack.checked = settings.getCurrentTrack;
     elements.tools.getTopTracks.checked = settings.getTopTracks;
     elements.tools.getRecentTracks.checked = settings.getRecentTracks;
@@ -144,6 +148,8 @@ export function addSettingsControls(settings: ExtensionSettings): void {
     handleInputChange(elements.scan, 'scan', value => value, resetInject);
     handleInputChange(elements.tools.searchTracks, 'searchTracks', value => value, syncFunctionTools);
     handleInputChange(elements.tools.controlPlayback, 'controlPlayback', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.playItem, 'playItem', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.queueTrack, 'queueTrack', value => value, syncFunctionTools);
     handleInputChange(elements.tools.getCurrentTrack, 'getCurrentTrack', value => value, syncFunctionTools);
     handleInputChange(elements.tools.getTopTracks, 'getTopTracks', value => value, syncFunctionTools);
     handleInputChange(elements.tools.getRecentTracks, 'getRecentTracks', value => value, syncFunctionTools);

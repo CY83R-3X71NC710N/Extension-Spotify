@@ -72,12 +72,14 @@ Example:
 The extension provides [function tools](https://docs.sillytavern.app/for-contributors/function-calling/) for supported APIs. The following functions are available (can be toggled individually in the extension settings):
 
 1. "Search Tracks": Search for tracks by name, artist or album.
-2. "Control Playback": Play a track, pause, resume, skip to the next track or the previous track.
-3. "Get Current Track": Get a track that is currently playing.
-4. "Get Top Tracks": Get top tracks of the user.
-5. "Get Recent Tracks": Get recently played tracks.
-6. "Get User Playlists": Get playlists of the user.
-7. "Get Playlist Tracks": Get a list of tracks from a playlist.
+2. "Play Item": Play a track, album, artist, or playlist.
+3. "Queue Track": Add a track to the queue.
+4. "Control Playback": Pause, resume, skip to the next track or the previous track.
+5. "Get Current Track": Get a track that is currently playing.
+6. "Get Top Tracks": Get top tracks of the user.
+7. "Get Recent Tracks": Get recently played tracks.
+8. "Get User Playlists": Get playlists of the user.
+9. "Get Playlist Tracks": Get a list of tracks from a playlist.
 
 ## License
 
