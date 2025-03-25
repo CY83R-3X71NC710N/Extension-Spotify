@@ -1,4 +1,4 @@
-# Spotify Extension
+# Spotify Extension for SillyTavern
 
 Provides function tools and information about the currently playing song on Spotify in SillyTavern prompts.
 
@@ -18,8 +18,8 @@ https://github.com/Cohee1207/Extension-Spotify
 
 ### Register an app
 
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
-2. Press "Create app".
+1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and log in with your Spotify account.
+2. Press "Create app" in the top right corner of the dashboard.
 3. Fill in the required fields:
     - App name (e.g. "SillyTavern Extension")
     - App description (e.g. "SillyTavern Spotify Extension")
@@ -48,11 +48,11 @@ Other examples:
 5. After authorization, you'll be redirected to the SillyTavern page with a success message.
 6. If you want to log out, you can do so by clicking the "Logout" button in the extension settings.
 
-### Configuration
+## Configuration
 
 After performing the initial setup, the extension will now be able to access your Spotify account and provide information about the currently playing song. You can configure the extension, including the injection template, role, position and depth.
 
-#### Template macros
+### Template macros
 
 Apart from the usual SillyTavern macros, the template field also supports the following additional parameters:
 
@@ -80,6 +80,20 @@ The extension provides [function tools](https://docs.sillytavern.app/for-contrib
 7. "Get Recent Tracks": Get recently played tracks.
 8. "Get User Playlists": Get playlists of the user.
 9. "Get Playlist Tracks": Get a list of tracks from a playlist.
+
+> "Search Tracks", "Play Item" and "Get Current Track" are enabled by default. The rest are disabled by default.
+
+## Contributing
+
+To build the extension, run the following command in the root directory of the extension:
+
+```bash
+npm install
+npm run build
+```
+
+**Create an issue** if you have ideas for new function tools.
+**Create a pull request** if you want to contribute to the extension.
 
 ## License
 
