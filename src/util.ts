@@ -1,70 +1,80 @@
-import { Sha256 } from '@aws-crypto/sha256-browser';
-import { SdkOptions } from '@spotify/web-api-ts-sdk';
+/**
+ * Utility functions for YouTube Music extension
+ */
 
 export function generateRandomString(length: number): string {
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     const values = crypto.getRandomValues(new Uint8Array(length));
-    return values.reduce((acc, x) => acc + possible[x % possible.length], '');
-}
-
-export function base64encode(input: Uint8Array): string {
-    return btoa(String.fromCharCode(...new Uint8Array(input)))
-        .replace(/=/g, '')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_');
-}
-
-export function sha256(message: string): Promise<Uint8Array> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(message);
-    const hash = new Sha256();
-    hash.update(data);
-    return hash.digest();
-}
-
-// Spotify URI regex pattern
-const SPOTIFY_URI_REGEX = /^spotify:(track|album|playlist|artist):([a-zA-Z0-9]{22})$/;
-
-/**
- * Checks if a string is a valid Spotify URI
- * @param uri - The string to check
- * @returns True if the string is a valid Spotify URI
- */
-export function isSpotifyUri(uri: string): boolean {
-    return SPOTIFY_URI_REGEX.test(uri);
+    return Array.from(values)
+        .map(x => possible[x % possible.length])
+        .join('');
 }
 
 /**
- * Extracts the resource ID from a Spotify URI
- * @param uri - A Spotify URI in the format spotify:(type):(id)
- * @returns The extracted ID or an empty string if not a valid URI
+ * Formats a video URL or ID into a standard YouTube Music videoId format
+ * @param input Video URL or ID
+ * @returns Normalized videoId or null if invalid
  */
-export function getIdFromSpotifyUri(uri: string): string {
-    const match = uri.match(SPOTIFY_URI_REGEX);
-    return match ? match[2] : '';
+export function normalizeVideoId(input: string): string | null {
+    if (!input) return null;
+    
+    // If it's already a valid video ID (typically 11 characters)
+    if (/^[A-Za-z0-9_-]{11}$/.test(input)) {
+        return input;
+    }
+    
+    // Extract from YouTube/YouTube Music URLs
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|music\.youtube\.com\/watch\?v=)([A-Za-z0-9_-]{11})/,
+        /(?:youtube\.com|music\.youtube\.com)\/.*[?&]v=([A-Za-z0-9_-]{11})/
+    ];
+    
+    for (const pattern of patterns) {
+        const match = input.match(pattern);
+        if (match && match[1]) {
+            return match[1];
+        }
+    }
+    
+    return null;
 }
 
 /**
- * Gets the resource type from a Spotify URI
- * @param uri - A Spotify URI in the format spotify:(type):(id)
- * @returns The resource type (track, album, playlist, artist) or null if not a valid URI
+ * Formats a playlist URL or ID into a standard YouTube Music playlistId format
+ * @param input Playlist URL or ID
+ * @returns Normalized playlistId or null if invalid
  */
-export function getTypeFromSpotifyUri(uri: string): string | null {
-    const match = uri.match(SPOTIFY_URI_REGEX);
-    return match ? match[1] : null;
+export function normalizePlaylistId(input: string): string | null {
+    if (!input) return null;
+    
+    // If it's already a valid playlist ID
+    if (/^[A-Za-z0-9_-]{34}$/.test(input) || /^PL[A-Za-z0-9_-]{32}$/.test(input) || /^RD[A-Za-z0-9_-]{32}$/.test(input) || /^OL[A-Za-z0-9_-]{32}$/.test(input)) {
+        return input;
+    }
+    
+    // Extract from YouTube/YouTube Music playlist URLs
+    const playlistPattern = /(?:youtube\.com|music\.youtube\.com)\/.*[?&]list=([A-Za-z0-9_-]{34}|PL[A-Za-z0-9_-]{32}|RD[A-Za-z0-9_-]{32}|OL[A-Za-z0-9_-]{32})/;
+    const match = input.match(playlistPattern);
+    
+    if (match && match[1]) {
+        return match[1];
+    }
+    
+    return null;
 }
 
-/**
- * Forgives JSON parsing errors by returning null instead of throwing an error.
- */
-export const laxJsonConfig: SdkOptions = {
-    deserializer: {
-        deserialize: async <TReturnType>(response: Response): Promise<TReturnType> => {
-            try {
-                return await response.json();
-            } catch {
-                return null as TReturnType;
-            }
-        },
-    },
+// Common configuration for JSON parsing with more relaxed rules
+export const laxJsonConfig = {
+    transformResponse: [(data: string) => {
+        try {
+            return JSON.parse(data);
+        } catch (e) {
+            // Some YouTube Music API responses might be malformed JSON
+            // Try to clean it up and parse
+            const cleaned = data
+                .replace(/,\s*}/g, '}')
+                .replace(/,\s*]/g, ']');
+            return JSON.parse(cleaned);
+        }
+    }]
 };

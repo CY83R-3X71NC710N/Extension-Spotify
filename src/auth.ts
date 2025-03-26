@@ -1,152 +1,93 @@
-import { SpotifyApi } from '@spotify/web-api-ts-sdk';
+import YTMusic from 'ytmusic-api';
 import { getSettings, ExtensionSettings } from './settings';
-import { generateRandomString, sha256, base64encode } from './util';
-import { SPOTIFY_SCOPES, VERIFIER_KEY } from './constants';
+import { COOKIE_KEY } from './constants';
+import { YTMusicCookies } from './types';
 
 const { t, saveSettingsDebounced } = SillyTavern.getContext();
 
-export async function authenticateSpotify(): Promise<void> {
-    const settings = getSettings();
+let ytMusicClient: YTMusic | null = null;
 
-    if (!settings.clientId) {
-        toastr.error(t`Please enter your Spotify Client ID in the settings.`);
-        return;
-    }
-
-    const codeVerifier = generateRandomString(64);
-    const hashed = await sha256(codeVerifier);
-    const codeChallenge = base64encode(hashed);
-    const redirectUri = new URL('/callback/spotify', location.origin);
-    const params = {
-        response_type: 'code',
-        client_id: settings.clientId,
-        scope: SPOTIFY_SCOPES.join(' '),
-        redirect_uri: redirectUri.toString(),
-        code_challenge_method: 'S256',
-        code_challenge: codeChallenge,
-    };
-
-    sessionStorage.setItem(VERIFIER_KEY, codeVerifier);
-    const authUrl = new URL('https://accounts.spotify.com/authorize');
-    authUrl.search = new URLSearchParams(params).toString();
-    window.location.href = authUrl.toString();
-}
-
-function readCode(): string | null {
-    const urlParams = new URLSearchParams(window.location.search);
-    const source = urlParams.get('source');
-    if (source !== 'spotify') {
+export async function initYTMusicClient(settings: ExtensionSettings): Promise<YTMusic | null> {
+    if (!settings.cookieData) {
+        setUserName(t`[Not logged in]`);
         return null;
     }
-    const query = urlParams.get('query');
-    if (query) {
-        const params = new URLSearchParams(query);
-        const code = params.get('code');
-        window.history.replaceState({}, document.title, window.location.pathname);
-        return code;
-    }
-    return null;
-}
-
-export async function tryGetClientToken(settings: ExtensionSettings): Promise<void> {
-    const code = readCode();
-    const codeVerifier = sessionStorage.getItem(VERIFIER_KEY);
-    if (!code || !codeVerifier || !settings.clientId) {
-        return;
-    }
-
-    const url = 'https://accounts.spotify.com/api/token';
-    const redirectUri = new URL('/callback/spotify', window.location.origin);
-    const payload = {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-            client_id: settings.clientId,
-            grant_type: 'authorization_code',
-            redirect_uri: redirectUri.toString(),
-            code_verifier: codeVerifier,
-            code,
-        }),
-    };
 
     try {
-        const body = await fetch(url, payload);
-        const token = await body.json();
-
-        settings.clientToken = token;
-        sessionStorage.removeItem(VERIFIER_KEY);
-        saveSettingsDebounced();
-
-        console.log('Spotify token received:', token);
-        toastr.success(t`Successfully authenticated with Spotify!`);
+        ytMusicClient = new YTMusic({ cookie: settings.cookieData.cookie });
+        return ytMusicClient;
     } catch (error) {
-        console.error('Error during Spotify authentication:', error);
-        toastr.error(t`Spotify authentication failed. Please try again.`);
-    }
-}
-
-export async function refreshTokenIfNeeded(settings: ExtensionSettings): Promise<void> {
-    if (!settings.clientToken || !settings.clientId) {
-        return;
-    }
-
-    const tokenExpiration = settings.clientToken.expires;
-    const refreshToken = settings.clientToken.refresh_token;
-    const currentTime = Date.now();
-    const refreshThreshold = 5 * 60 * 1000; // 5 minutes
-
-    if (tokenExpiration && (tokenExpiration - currentTime) < refreshThreshold) {
-        const url = 'https://accounts.spotify.com/api/token';
-        const payload = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: refreshToken,
-                client_id: settings.clientId,
-            }),
-        };
-
-        try {
-            const body = await fetch(url, payload);
-            const token = await body.json();
-            settings.clientToken = token;
-            // When a refresh token is not returned, continue using the existing token.
-            if (settings.clientToken && !token.refresh_token) {
-                settings.clientToken.refresh_token = refreshToken;
-            }
-            console.log('Spotify token refreshed:', token);
-            saveSettingsDebounced();
-        } catch (error) {
-            console.error('Error refreshing Spotify token:', error);
-        }
+        console.error('Error initializing YouTube Music client:', error);
+        settings.cookieData = null;
+        setUserName(t`[Auth failed]`);
+        saveSettingsDebounced();
+        return null;
     }
 }
 
 export function setUserName(name: string): void {
-    const userName = document.getElementById('spotify_user_name') as HTMLSpanElement;
+    const userName = document.getElementById('ytmusic_user_name') as HTMLSpanElement;
     if (userName) {
         userName.innerText = name;
     }
 }
 
-export async function tryReadClientData(settings: ExtensionSettings): Promise<void> {
-    if (!settings.clientToken || !settings.clientId) {
+export async function importYTMusicCookies(cookieString: string): Promise<void> {
+    if (!cookieString) {
+        toastr.error(t`Please provide valid YouTube Music cookies.`);
+        return;
+    }
+
+    const settings = getSettings();
+
+    try {
+        // Test connection with the cookies first
+        const testClient = new YTMusic({ cookie: cookieString });
+        // If successful, save the cookies and initialize client
+        settings.cookieData = {
+            cookie: cookieString,
+            expires: Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days expiration
+        };
+        saveSettingsDebounced();
+        ytMusicClient = testClient;
+        toastr.success(t`Successfully authenticated with YouTube Music!`);
+    } catch (error) {
+        console.error('Error during YouTube Music authentication:', error);
+        toastr.error(t`YouTube Music authentication failed. Please check your cookies and try again.`);
+    }
+}
+
+export async function tryGetClientFromCookies(settings: ExtensionSettings): Promise<void> {
+    if (!settings.cookieData) {
         setUserName(t`[Not logged in]`);
         return;
     }
 
     try {
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const user = await api.currentUser.profile();
-        setUserName(user.display_name || user.id);
+        const client = await initYTMusicClient(settings);
+        if (client) {
+            // Try to get user account info to confirm authentication
+            const accountInfo = await client.getAccountInfo();
+            setUserName(accountInfo.name || t`[Authenticated]`);
+        }
     } catch (error) {
-        console.error('Error fetching user data:', error);
-        settings.clientToken = null;
-        setUserName('[Token expired]');
+        console.error('Error fetching account data:', error);
+        settings.cookieData = null;
+        setUserName(t`[Auth failed]`);
+        saveSettingsDebounced();
+    }
+}
+
+export function checkCookieExpiration(settings: ExtensionSettings): void {
+    if (!settings.cookieData || !settings.cookieData.expires) {
+        return;
+    }
+
+    // If cookies are about to expire (within 3 days), show a warning
+    const warningThreshold = 3 * 24 * 60 * 60 * 1000; // 3 days
+    const currentTime = Date.now();
+    
+    if ((settings.cookieData.expires - currentTime) < warningThreshold) {
+        toastr.warning(t`Your YouTube Music cookies will expire soon. Please update them.`, '', { timeOut: 10000 });
     }
 }

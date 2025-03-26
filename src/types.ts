@@ -1,17 +1,24 @@
 export interface TrackViewModel {
-    uri: string;
+    videoId: string;
     name: string;
-    artist_uri: string | string[];
     artist: string | string[];
-    album_uri: string;
-    album: string;
-    release_date: string;
+    artistId?: string | string[];
+    album?: string;
+    albumId?: string;
+    thumbnailUrl?: string;
+    duration?: string;
 }
 
 export interface PlaylistViewModel {
-    uri: string;
+    playlistId: string;
     name: string;
-    description: string;
+    description?: string;
+    thumbnailUrl?: string;
+}
+
+export interface YTMusicCookies {
+    cookie: string;
+    expires?: number;
 }
 
 export type TimeRange = 'short_term' | 'medium_term' | 'long_term';

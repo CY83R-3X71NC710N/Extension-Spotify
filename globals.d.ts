@@ -7,5 +7,5 @@ import '../../../../global';
 
 // Add global type declarations here
 declare global {
-    function spotify_setCurrentTrack(): Promise<void>;
+    function ytmusic_setCurrentTrack(): Promise<void>;
 }

@@ -1,5 +1,5 @@
 {
-    "display_name": "Spotify",
+    "display_name": "YouTube Music",
     "loading_order": 100,
     "requires": [],
     "optional": [],
@@ -9,5 +9,5 @@
     "version": "1.0.0",
     "homePage": "https://github.com/Cohee1207/Extension-Spotify",
     "auto_update": true,
-    "generate_interceptor": "spotify_setCurrentTrack"
+    "generate_interceptor": "ytmusic_setCurrentTrack"
 }

@@ -11,14 +11,6 @@ export enum InjectionRole {
     Assistant = 2,
 }
 
-export const MODULE_NAME = 'spotify';
-export const INJECT_ID = 'spotify_inject';
-export const VERIFIER_KEY = 'spotify_verifier';
-
-export const SPOTIFY_SCOPES = [
-    'user-read-private',
-    'user-read-playback-state',
-    'user-top-read',
-    'user-modify-playback-state',
-    'playlist-read-private',
-];
+export const MODULE_NAME = 'ytmusic';
+export const INJECT_ID = 'ytmusic_inject';
+export const COOKIE_KEY = 'ytmusic_cookie';

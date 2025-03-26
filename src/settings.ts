@@ -1,15 +1,14 @@
-import { AccessToken } from '@spotify/web-api-ts-sdk';
 import { InjectionPosition, InjectionRole, MODULE_NAME } from './constants';
-import { authenticateSpotify, setUserName } from './auth';
-import { syncFunctionTools, SpotifyTool } from './tools';
+import { setUserName, importYTMusicCookies, tryGetClientFromCookies } from './auth';
+import { syncFunctionTools, YTMusicTool } from './tools';
 import { resetInject } from './prompt';
+import { YTMusicCookies } from './types';
 import html from './settings.html';
 
 const { t, saveSettingsDebounced } = SillyTavern.getContext();
 
 interface ExtensionSettingsBase {
-    clientId: string;
-    clientToken: AccessToken | null;
+    cookieData: YTMusicCookies | null;
     template: string;
     position: InjectionPosition;
     role: InjectionRole;
@@ -19,91 +18,84 @@ interface ExtensionSettingsBase {
     [key: string]: unknown;
 }
 
-type SpotifyToolSettings = {
-    [key in SpotifyTool]: boolean;
+type YTMusicToolSettings = {
+    [key in YTMusicTool]: boolean;
 };
 
-export type ExtensionSettings = ExtensionSettingsBase & SpotifyToolSettings;
+export type ExtensionSettings = ExtensionSettingsBase & YTMusicToolSettings;
 
 interface GlobalSettings {
     [MODULE_NAME]: ExtensionSettings;
 }
 
 const defaultSettings: Readonly<ExtensionSettings> = Object.freeze({
-    clientId: '',
-    clientToken: null,
-    template: '[{{user}} is listening to {{song}} by {{artist}} on Spotify]',
+    cookieData: null,
+    template: '[{{user}} is listening to {{song}} by {{artist}} on YouTube Music]',
     position: InjectionPosition.InChat,
     role: InjectionRole.System,
     depth: 1,
     scan: true,
-    searchTracks: true,
-    controlPlayback: false,
+    searchSongs: true,
+    getCurrentSong: true,
+    getQueue: false,
     playItem: true,
-    queueTrack: false,
-    getCurrentTrack: true,
-    getTopTracks: false,
-    getRecentTracks: false,
-    getPlaylists: false,
-    getPlaylistTracks: false,
+    getHistory: false,
+    getUserPlaylists: false,
+    getPlaylistItems: false,
+    searchArtists: false,
+    searchAlbums: false,
 });
 
 export function getSettings(): ExtensionSettings {
     const context = SillyTavern.getContext();
     const globalSettings = context.extensionSettings as object as GlobalSettings;
-
     // Initialize settings if they don't exist
     if (!globalSettings[MODULE_NAME]) {
         globalSettings[MODULE_NAME] = structuredClone(defaultSettings);
     }
-
     // Ensure all default keys exist (helpful after updates)
     for (const key in defaultSettings) {
         if (globalSettings[MODULE_NAME][key] === undefined) {
             globalSettings[MODULE_NAME][key] = defaultSettings[key];
         }
     }
-
     return globalSettings[MODULE_NAME];
 }
 
 export function addSettingsControls(settings: ExtensionSettings): void {
-
-    const settingsContainer = document.getElementById('spotify_container') ?? document.getElementById('extensions_settings2');
+    const settingsContainer = document.getElementById('ytmusic_container') ?? document.getElementById('extensions_settings2');
     if (!settingsContainer) {
         return;
     }
-
     const renderer = document.createElement('template');
     renderer.innerHTML = html;
-
     settingsContainer.appendChild(renderer.content);
 
     // Setup UI elements
     const elements = {
-        clientId: document.getElementById('spotify_client_id') as HTMLInputElement,
-        template: document.getElementById('spotify_template') as HTMLTextAreaElement,
-        role: document.getElementById('spotify_role') as HTMLSelectElement,
-        position: Array.from(document.getElementsByName('spotify_position')) as HTMLInputElement[],
-        depth: document.getElementById('spotify_depth') as HTMLInputElement,
-        scan: document.getElementById('spotify_scan') as HTMLInputElement,
-        authButton: document.getElementById('spotify_auth') as HTMLDivElement,
-        logoutButton: document.getElementById('spotify_logout') as HTMLDivElement,
+        cookieInput: document.getElementById('ytmusic_cookie_input') as HTMLTextAreaElement,
+        template: document.getElementById('ytmusic_template') as HTMLTextAreaElement,
+        role: document.getElementById('ytmusic_role') as HTMLSelectElement,
+        position: Array.from(document.getElementsByName('ytmusic_position')) as HTMLInputElement[],
+        depth: document.getElementById('ytmusic_depth') as HTMLInputElement,
+        scan: document.getElementById('ytmusic_scan') as HTMLInputElement,
+        authButton: document.getElementById('ytmusic_auth') as HTMLDivElement,
+        logoutButton: document.getElementById('ytmusic_logout') as HTMLDivElement,
         tools: {
-            searchTracks: document.getElementById('spotify_tool_search_tracks') as HTMLInputElement,
-            controlPlayback: document.getElementById('spotify_tool_control_playback') as HTMLInputElement,
-            playItem: document.getElementById('spotify_tool_play_item') as HTMLInputElement,
-            queueTrack: document.getElementById('spotify_tool_queue_track') as HTMLInputElement,
-            getCurrentTrack: document.getElementById('spotify_tool_get_current_track') as HTMLInputElement,
-            getTopTracks: document.getElementById('spotify_tool_get_top_tracks') as HTMLInputElement,
-            getRecentTracks: document.getElementById('spotify_tool_get_recent_tracks') as HTMLInputElement,
-            getPlaylists: document.getElementById('spotify_tool_get_playlists') as HTMLInputElement,
-            getPlaylistTracks: document.getElementById('spotify_tool_get_playlist_tracks') as HTMLInputElement,
+            searchSongs: document.getElementById('ytmusic_tool_search_songs') as HTMLInputElement,
+            getCurrentSong: document.getElementById('ytmusic_tool_get_current_song') as HTMLInputElement,
+            getQueue: document.getElementById('ytmusic_tool_get_queue') as HTMLInputElement,
+            playItem: document.getElementById('ytmusic_tool_play_item') as HTMLInputElement,
+            getHistory: document.getElementById('ytmusic_tool_get_history') as HTMLInputElement,
+            getUserPlaylists: document.getElementById('ytmusic_tool_get_user_playlists') as HTMLInputElement,
+            getPlaylistItems: document.getElementById('ytmusic_tool_get_playlist_items') as HTMLInputElement,
+            searchArtists: document.getElementById('ytmusic_tool_search_artists') as HTMLInputElement,
+            searchAlbums: document.getElementById('ytmusic_tool_search_albums') as HTMLInputElement,
         },
     };
 
     // Initialize UI with current settings
-    elements.clientId.value = settings.clientId;
+    elements.cookieInput.value = '';
     elements.template.value = settings.template;
     elements.role.value = settings.role.toString();
     elements.position.forEach((radio) => {
@@ -111,15 +103,17 @@ export function addSettingsControls(settings: ExtensionSettings): void {
     });
     elements.depth.value = settings.depth.toString();
     elements.scan.checked = settings.scan;
-    elements.tools.searchTracks.checked = settings.searchTracks;
-    elements.tools.controlPlayback.checked = settings.controlPlayback;
+
+    // Initialize tool checkboxes
+    elements.tools.searchSongs.checked = settings.searchSongs;
+    elements.tools.getCurrentSong.checked = settings.getCurrentSong;
+    elements.tools.getQueue.checked = settings.getQueue;
     elements.tools.playItem.checked = settings.playItem;
-    elements.tools.queueTrack.checked = settings.queueTrack;
-    elements.tools.getCurrentTrack.checked = settings.getCurrentTrack;
-    elements.tools.getTopTracks.checked = settings.getTopTracks;
-    elements.tools.getRecentTracks.checked = settings.getRecentTracks;
-    elements.tools.getPlaylists.checked = settings.getPlaylists;
-    elements.tools.getPlaylistTracks.checked = settings.getPlaylistTracks;
+    elements.tools.getHistory.checked = settings.getHistory;
+    elements.tools.getUserPlaylists.checked = settings.getUserPlaylists;
+    elements.tools.getPlaylistItems.checked = settings.getPlaylistItems;
+    elements.tools.searchArtists.checked = settings.searchArtists;
+    elements.tools.searchAlbums.checked = settings.searchAlbums;
 
     // Define a generic handler for simple input changes
     const handleInputChange = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -141,20 +135,21 @@ export function addSettingsControls(settings: ExtensionSettings): void {
     };
 
     // Set up event listeners
-    handleInputChange(elements.clientId, 'clientId', value => value);
     handleInputChange(elements.template, 'template', value => value, resetInject);
     handleInputChange(elements.role, 'role', value => parseInt(value as string), resetInject);
     handleInputChange(elements.depth, 'depth', value => parseInt(value as string), resetInject);
     handleInputChange(elements.scan, 'scan', value => value, resetInject);
-    handleInputChange(elements.tools.searchTracks, 'searchTracks', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.controlPlayback, 'controlPlayback', value => value, syncFunctionTools);
+
+    // Tool checkbox listeners
+    handleInputChange(elements.tools.searchSongs, 'searchSongs', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getCurrentSong, 'getCurrentSong', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getQueue, 'getQueue', value => value, syncFunctionTools);
     handleInputChange(elements.tools.playItem, 'playItem', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.queueTrack, 'queueTrack', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.getCurrentTrack, 'getCurrentTrack', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.getTopTracks, 'getTopTracks', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.getRecentTracks, 'getRecentTracks', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.getPlaylists, 'getPlaylists', value => value, syncFunctionTools);
-    handleInputChange(elements.tools.getPlaylistTracks, 'getPlaylistTracks', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getHistory, 'getHistory', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getUserPlaylists, 'getUserPlaylists', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.getPlaylistItems, 'getPlaylistItems', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.searchArtists, 'searchArtists', value => value, syncFunctionTools);
+    handleInputChange(elements.tools.searchAlbums, 'searchAlbums', value => value, syncFunctionTools);
 
     // Handle radio buttons separately
     elements.position.forEach((radio) => {
@@ -166,11 +161,12 @@ export function addSettingsControls(settings: ExtensionSettings): void {
 
     // Auth buttons
     elements.authButton.addEventListener('click', () => {
-        authenticateSpotify();
+        const cookieString = elements.cookieInput.value.trim();
+        importYTMusicCookies(cookieString);
     });
 
     elements.logoutButton.addEventListener('click', () => {
-        settings.clientToken = null;
+        settings.cookieData = null;
         setUserName(t`[Not logged in]`);
         saveSettingsDebounced();
     });

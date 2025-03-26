@@ -1,5 +1,5 @@
 {
-    "name": "extension-spotify",
+    "name": "extension-ytmusic",
     "version": "1.0.0",
     "private": true,
     "type": "module",
@@ -21,6 +21,6 @@
     },
     "dependencies": {
         "@aws-crypto/sha256-browser": "^5.2.0",
-        "@spotify/web-api-ts-sdk": "^1.2.0"
+        "ytmusic-api": "^4.4.0"
     }
 }

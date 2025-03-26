@@ -1,19 +1,19 @@
-import { SpotifyApi, Track, SimplifiedPlaylist } from '@spotify/web-api-ts-sdk';
+import YTMusic from 'ytmusic-api';
 import { getSettings } from './settings';
-import { refreshTokenIfNeeded } from './auth';
-import { TrackViewModel, PlaylistViewModel, TimeRange } from './types';
-import { getIdFromSpotifyUri, isSpotifyUri, laxJsonConfig } from './util';
+import { initYTMusicClient, checkCookieExpiration } from './auth';
+import { TrackViewModel, PlaylistViewModel } from './types';
 
-export type SpotifyTool =
-    'searchTracks'
-    | 'controlPlayback'
-    | 'queueTrack'
+export type YTMusicTool =
+    'searchSongs'
     | 'playItem'
-    | 'getCurrentTrack'
-    | 'getTopTracks'
-    | 'getRecentTracks'
-    | 'getPlaylists'
-    | 'getPlaylistTracks';
+    | 'getCurrentSong'
+    | 'getQueue'
+    | 'getHistory'
+    | 'getUserPlaylists'
+    | 'getPlaylistItems'
+    | 'searchArtists'
+    | 'searchAlbums';
+
 type ToolParametersSchema = Readonly<Record<string, unknown>>;
 type ToolCallback = (...args: never[]) => Promise<unknown>;
 
@@ -26,440 +26,461 @@ interface ToolDefinition {
     shouldRegister: () => Promise<boolean>;
 }
 
-interface SearchTracksParameters {
+interface SearchSongsParameters {
     query: string;
 }
 
-interface ControlPlaybackParameters {
-    action: string;
+interface SearchArtistsParameters {
+    query: string;
 }
 
-interface QueueTrackParameters {
-    uri: string;
+interface SearchAlbumsParameters {
+    query: string;
 }
 
 interface PlayItemParameters {
-    uri?: string;
-    contextUri?: string;
+    videoId?: string;
+    playlistId?: string;
 }
 
-interface GetTopTrackParameters {
-    timeRange: string;
+interface GetPlaylistItemsParameters {
+    playlistId: string;
 }
 
-interface GetPlaylistTracksParameters {
-    playlistUri: string;
-}
-
-const TOOL_PARAMETERS: Record<SpotifyTool, ToolParametersSchema> = {
-    searchTracks: Object.freeze({
+const TOOL_PARAMETERS: Record<YTMusicTool, ToolParametersSchema> = {
+    searchSongs: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',
         properties: {
             query: {
                 type: 'string',
-                description: 'The search query for the track.',
+                description: 'The search query for the song.',
             },
         },
         required: ['query'],
     }),
-    controlPlayback: Object.freeze({
+    searchArtists: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',
         properties: {
-            action: {
+            query: {
                 type: 'string',
-                description: 'The action to perform. Possible values are: play, queue, pause, resume, next, previous.',
+                description: 'The search query for the artist.',
             },
         },
-        required: ['action'],
+        required: ['query'],
     }),
-    queueTrack: Object.freeze({
+    searchAlbums: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',
         properties: {
-            uri: {
+            query: {
                 type: 'string',
-                description: 'The URI of the track to queue.',
+                description: 'The search query for the album.',
             },
         },
-        required: ['uri'],
+        required: ['query'],
     }),
     playItem: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',
         properties: {
-            uri: {
+            videoId: {
                 type: 'string',
-                description: 'The track URI to play. Optional if "contextUri" is provided.',
+                description: 'The video ID of the song to play. Optional if "playlistId" is provided.',
             },
-            contextUri: {
+            playlistId: {
                 type: 'string',
-                description: 'The URI of the album, artist, or playlist to start playback from. Optional if "uri" is provided.',
+                description: 'The ID of the playlist to play. Optional if "videoId" is provided.',
             },
         },
         required: [],
     }),
-    getCurrentTrack: Object.freeze({
+    getCurrentSong: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',
         properties: {},
         required: [],
     }),
-    getTopTracks: Object.freeze({
+    getQueue: Object.freeze({
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        type: 'object',
+        properties: {},
+        required: [],
+    }),
+    getHistory: Object.freeze({
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        type: 'object',
+        properties: {},
+        required: [],
+    }),
+    getUserPlaylists: Object.freeze({
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        type: 'object',
+        properties: {},
+        required: [],
+    }),
+    getPlaylistItems: Object.freeze({
         $schema: 'http://json-schema.org/draft-04/schema#',
         type: 'object',
         properties: {
-            timeRange: {
+            playlistId: {
                 type: 'string',
-                description: 'The time range for the top tracks. Possible values are: short_term, medium_term, long_term. Default is short_term.',
+                description: 'The ID of the playlist to get the songs from.',
             },
         },
-        required: [],
-    }),
-    getRecentTracks: Object.freeze({
-        $schema: 'http://json-schema.org/draft-04/schema#',
-        type: 'object',
-        properties: {},
-        required: [],
-    }),
-    getPlaylists: Object.freeze({
-        $schema: 'http://json-schema.org/draft-04/schema#',
-        type: 'object',
-        properties: {},
-        required: [],
-    }),
-    getPlaylistTracks: Object.freeze({
-        $schema: 'http://json-schema.org/draft-04/schema#',
-        type: 'object',
-        properties: {
-            playlistUri: {
-                type: 'string',
-                description: 'The URI of the playlist to get the tracks from.',
-            },
-        },
-        required: ['playlistUri'],
+        required: ['playlistId'],
     }),
 };
 
-const TOOL_CALLBACKS: Record<SpotifyTool, ToolCallback> = {
-    searchTracks: searchTracksCallback,
-    controlPlayback: controlPlaybackCallback,
-    queueTrack: queueTrackCallback,
+const TOOL_CALLBACKS: Record<YTMusicTool, ToolCallback> = {
+    searchSongs: searchSongsCallback,
+    searchArtists: searchArtistsCallback,
+    searchAlbums: searchAlbumsCallback,
     playItem: playItemCallback,
-    getCurrentTrack: getCurrentTrackCallback,
-    getTopTracks: getTopTracksCallback,
-    getRecentTracks: getRecentTracksCallback,
-    getPlaylists: getPlaylistsCallback,
-    getPlaylistTracks: getPlaylistTracksCallback,
+    getCurrentSong: getCurrentSongCallback,
+    getQueue: getQueueCallback,
+    getHistory: getHistoryCallback,
+    getUserPlaylists: getUserPlaylistsCallback,
+    getPlaylistItems: getPlaylistItemsCallback,
 };
 
-const TOOL_DEFINITIONS: Record<SpotifyTool, ToolDefinition> = {
-    searchTracks: {
-        name: 'SpotifySearchTracks',
-        displayName: 'Spotify: Search Tracks',
-        description: 'Search for tracks on Spotify. Call when you need to find a URI for a track.',
-        parameters: TOOL_PARAMETERS.searchTracks,
-        action: TOOL_CALLBACKS.searchTracks,
+const TOOL_DEFINITIONS: Record<YTMusicTool, ToolDefinition> = {
+    searchSongs: {
+        name: 'YTMusicSearchSongs',
+        displayName: 'YouTube Music: Search Songs',
+        description: 'Search for songs on YouTube Music. Call when you need to find a song by name or artist.',
+        parameters: TOOL_PARAMETERS.searchSongs,
+        action: TOOL_CALLBACKS.searchSongs,
         shouldRegister: isToolValid,
     },
-    controlPlayback: {
-        name: 'SpotifyControlPlayback',
-        displayName: 'Spotify: Control Playback',
-        description: 'Control playback on Spotify. Call when the user wants to resume, pause, or skip a track.',
-        parameters: TOOL_PARAMETERS.controlPlayback,
-        action: TOOL_CALLBACKS.controlPlayback,
+    searchArtists: {
+        name: 'YTMusicSearchArtists',
+        displayName: 'YouTube Music: Search Artists',
+        description: 'Search for artists on YouTube Music. Call when you need to find artists by name.',
+        parameters: TOOL_PARAMETERS.searchArtists,
+        action: TOOL_CALLBACKS.searchArtists,
         shouldRegister: isToolValid,
     },
-    queueTrack: {
-        name: 'SpotifyQueueTrack',
-        displayName: 'Spotify: Queue Track',
-        description: 'Queues a track on Spotify. Call when the user wants to queue a track.',
-        parameters: TOOL_PARAMETERS.queueTrack,
-        action: TOOL_CALLBACKS.queueTrack,
+    searchAlbums: {
+        name: 'YTMusicSearchAlbums',
+        displayName: 'YouTube Music: Search Albums',
+        description: 'Search for albums on YouTube Music. Call when you need to find albums by title or artist.',
+        parameters: TOOL_PARAMETERS.searchAlbums,
+        action: TOOL_CALLBACKS.searchAlbums,
         shouldRegister: isToolValid,
     },
     playItem: {
-        name: 'SpotifyPlayItem',
-        displayName: 'Spotify: Play Item',
-        description: 'Plays a track, album or artist on Spotify. Call when the user wants to start playback.',
+        name: 'YTMusicPlayItem',
+        displayName: 'YouTube Music: Play Item',
+        description: 'Play a song or playlist on YouTube Music. Call when the user wants to start playback.',
         parameters: TOOL_PARAMETERS.playItem,
         action: TOOL_CALLBACKS.playItem,
         shouldRegister: isToolValid,
     },
-    getCurrentTrack: {
-        name: 'SpotifyGetCurrentTrack',
-        displayName: 'Spotify: Get Current Track',
-        description: 'Gets the current track playing on Spotify. Call when you need to display the current track.',
-        parameters: TOOL_PARAMETERS.getCurrentTrack,
-        action: TOOL_CALLBACKS.getCurrentTrack,
+    getCurrentSong: {
+        name: 'YTMusicGetCurrentSong',
+        displayName: 'YouTube Music: Get Current Song',
+        description: 'Gets the current song playing on YouTube Music. Call when you need to display the current song.',
+        parameters: TOOL_PARAMETERS.getCurrentSong,
+        action: TOOL_CALLBACKS.getCurrentSong,
         shouldRegister: isToolValid,
     },
-    getTopTracks: {
-        name: 'SpotifyGetTopTracks',
-        displayName: 'Spotify: Get Top Tracks',
-        description: 'Gets a list of user\'s top tracks. Call when the user wants to see their top tracks, play a favorite track, asks for recommendations, etc.',
-        parameters: TOOL_PARAMETERS.getTopTracks,
-        action: TOOL_CALLBACKS.getTopTracks,
+    getQueue: {
+        name: 'YTMusicGetQueue',
+        displayName: 'YouTube Music: Get Queue',
+        description: 'Gets the current queue of songs on YouTube Music. Call when the user wants to see their queue.',
+        parameters: TOOL_PARAMETERS.getQueue,
+        action: TOOL_CALLBACKS.getQueue,
         shouldRegister: isToolValid,
     },
-    getRecentTracks: {
-        name: 'SpotifyGetRecentTracks',
-        displayName: 'Spotify: Get Recent Tracks',
-        description: 'Gets a list of user\'s recently played tracks. Call when the user wants to see their recent tracks.',
-        parameters: TOOL_PARAMETERS.getRecentTracks,
-        action: TOOL_CALLBACKS.getRecentTracks,
+    getHistory: {
+        name: 'YTMusicGetHistory',
+        displayName: 'YouTube Music: Get History',
+        description: 'Gets the history of recently played songs. Call when the user wants to see their recently played tracks.',
+        parameters: TOOL_PARAMETERS.getHistory,
+        action: TOOL_CALLBACKS.getHistory,
         shouldRegister: isToolValid,
     },
-    getPlaylists: {
-        name: 'SpotifyGetPlaylists',
-        displayName: 'Spotify: Get Playlists',
-        description: 'Gets a list of user\'s playlists. Call when the user wants to see their playlists.',
-        parameters: TOOL_PARAMETERS.getPlaylists,
-        action: TOOL_CALLBACKS.getPlaylists,
+    getUserPlaylists: {
+        name: 'YTMusicGetUserPlaylists',
+        displayName: 'YouTube Music: Get User Playlists',
+        description: 'Gets a list of user\'s playlists on YouTube Music.',
+        parameters: TOOL_PARAMETERS.getUserPlaylists,
+        action: TOOL_CALLBACKS.getUserPlaylists,
         shouldRegister: isToolValid,
     },
-    getPlaylistTracks: {
-        name: 'SpotifyGetPlaylistTracks',
-        displayName: 'Spotify: Get Playlist Tracks',
-        description: 'Gets a list of tracks in a playlist. Call when you need to see the tracks in a playlist.',
-        parameters: TOOL_PARAMETERS.getPlaylistTracks,
-        action: TOOL_CALLBACKS.getPlaylistTracks,
+    getPlaylistItems: {
+        name: 'YTMusicGetPlaylistItems',
+        displayName: 'YouTube Music: Get Playlist Items',
+        description: 'Gets a list of songs in a playlist on YouTube Music.',
+        parameters: TOOL_PARAMETERS.getPlaylistItems,
+        action: TOOL_CALLBACKS.getPlaylistItems,
         shouldRegister: isToolValid,
     },
 };
 
-function trackToViewModel(track: Track): TrackViewModel {
+function songToViewModel(song: any): TrackViewModel {
     return {
-        uri: track.uri,
-        name: track.name,
-        artist: track.artists.length === 1 ? track.artists[0].name : track.artists.map(a => a.name),
-        artist_uri: track.artists.length === 1 ? track.artists[0].uri : track.artists.map(a => a.uri),
-        album: track.album.name,
-        album_uri: track.album.uri,
-        release_date: track.album.release_date,
+        videoId: song.videoId,
+        name: song.title,
+        artist: Array.isArray(song.artists) 
+            ? song.artists.map((a: any) => a.name) 
+            : song.artists?.name || 'Unknown Artist',
+        artistId: Array.isArray(song.artists) 
+            ? song.artists.map((a: any) => a.id) 
+            : song.artists?.id,
+        album: song.album?.name,
+        albumId: song.album?.id,
+        thumbnailUrl: song.thumbnails?.[0]?.url,
+        duration: song.duration,
     };
 }
 
-function playlistToViewModel(playlist: SimplifiedPlaylist): PlaylistViewModel {
+function playlistToViewModel(playlist: any): PlaylistViewModel {
     return {
-        uri: playlist.uri,
-        name: playlist.name,
+        playlistId: playlist.playlistId,
+        name: playlist.title,
         description: playlist.description,
+        thumbnailUrl: playlist.thumbnails?.[0]?.url,
     };
 }
 
 async function isToolValid(): Promise<boolean> {
     const settings = getSettings();
-    return !!(settings.clientToken && settings.clientId);
+    return !!settings.cookieData;
 }
 
-async function searchTracksCallback({ query }: SearchTracksParameters): Promise<string | TrackViewModel[]> {
+async function searchSongsCallback({ query }: SearchSongsParameters): Promise<string | TrackViewModel[]> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const result = await api.search(query, ['track']);
-        const tracks = result.tracks.items.map(trackToViewModel);
-        return tracks;
+
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
+        }
+
+        const results = await ytMusic.search(query, 'songs');
+        return results.map(songToViewModel);
     } catch (error) {
-        console.error('Error searching tracks:', error);
-        return 'Error searching tracks. See console for details.';
+        console.error('Error searching songs:', error);
+        return 'Error searching songs. See console for details.';
     }
 }
 
-async function playItemCallback({ uri, contextUri }: PlayItemParameters): Promise<string> {
+async function searchArtistsCallback({ query }: SearchArtistsParameters): Promise<string | any[]> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        if (!uri && !contextUri) {
-            return 'URI or context URI is required for play action.';
+
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken, laxJsonConfig);
-        const device = await api.player.getAvailableDevices();
-        const activeDevice = device.devices.find(d => d.is_active);
-        if (!activeDevice?.id) {
-            return 'No active device found. Start a Spotify client on a device.';
-        }
-        const uris = uri ? [uri] : void 0;
-        await api.player.startResumePlayback(activeDevice.id, contextUri, uris);
-        return `Playback started on device: ${activeDevice?.name}`;
+
+        const results = await ytMusic.search(query, 'artists');
+        return results.map((artist: any) => ({
+            artistId: artist.browseId,
+            name: artist.artist,
+            thumbnailUrl: artist.thumbnails?.[0]?.url,
+        }));
     } catch (error) {
-        console.error('Error queuing track:', error);
-        return 'Error queuing track. See console for details.';
+        console.error('Error searching artists:', error);
+        return 'Error searching artists. See console for details.';
     }
 }
 
-async function queueTrackCallback({ uri }: QueueTrackParameters): Promise<string> {
+async function searchAlbumsCallback({ query }: SearchAlbumsParameters): Promise<string | any[]> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        if (!uri) {
-            return 'URI is required for queue action.';
+
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken, laxJsonConfig);
-        const device = await api.player.getAvailableDevices();
-        const activeDevice = device.devices.find(d => d.is_active);
-        if (!activeDevice?.id) {
-            return 'No active device found. Start a Spotify client on a device.';
-        }
-        await api.player.addItemToPlaybackQueue(uri, activeDevice.id);
-        return `Track queued on device: ${activeDevice?.name}`;
+
+        const results = await ytMusic.search(query, 'albums');
+        return results.map((album: any) => ({
+            albumId: album.browseId,
+            name: album.title,
+            artist: album.artists?.[0]?.name || 'Unknown Artist',
+            artistId: album.artists?.[0]?.id,
+            thumbnailUrl: album.thumbnails?.[0]?.url,
+            year: album.year,
+        }));
     } catch (error) {
-        console.error('Error queuing track:', error);
-        return 'Error queuing track. See console for details.';
+        console.error('Error searching albums:', error);
+        return 'Error searching albums. See console for details.';
     }
 }
 
-async function controlPlaybackCallback({ action }: ControlPlaybackParameters): Promise<string> {
+async function playItemCallback({ videoId, playlistId }: PlayItemParameters): Promise<string> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken, laxJsonConfig);
-        const device = await api.player.getAvailableDevices();
-        const activeDevice = device.devices.find(d => d.is_active);
-        if (!activeDevice?.id) {
-            return 'No active device found. Start a Spotify client on a device.';
+
+        if (!videoId && !playlistId) {
+            return 'Either videoId or playlistId is required to play music.';
         }
-        switch (action) {
-            case 'pause': {
-                await api.player.pausePlayback(activeDevice.id);
-                return `Paused playback on device: ${activeDevice?.name}`;
-            }
-            case 'resume': {
-                await api.player.startResumePlayback(activeDevice.id);
-                return `Resumed playback on device: ${activeDevice?.name}`;
-            }
-            case 'next': {
-                await api.player.skipToNext(activeDevice.id);
-                return `Skipped to next track on device: ${activeDevice?.name}`;
-            }
-            case 'previous': {
-                await api.player.skipToPrevious(activeDevice.id);
-                return `Skipped to previous track on device: ${activeDevice?.name}`;
-            }
-            default:
-                return 'Unknown action: ' + action;
+
+        // Note: ytmusic-api doesn't directly support playback control
+        // We'll instead return a URL that the user can open
+        
+        if (videoId) {
+            return `To play this song, open: https://music.youtube.com/watch?v=${videoId}`;
+        } else if (playlistId) {
+            return `To play this playlist, open: https://music.youtube.com/playlist?list=${playlistId}`;
         }
+        
+        return 'Unable to generate a playback URL.';
     } catch (error) {
-        console.error('Error controlling playback:', error);
-        return 'Error controlling playback. See console for details.';
+        console.error('Error with play item:', error);
+        return 'Error with play item. See console for details.';
     }
 }
 
-async function getCurrentTrackCallback(): Promise<string | TrackViewModel> {
+async function getCurrentSongCallback(): Promise<string | TrackViewModel> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const currentlyPlaying = await api.player.getCurrentlyPlayingTrack();
-        const track = currentlyPlaying.item.type === 'track' ? currentlyPlaying.item as Track : null;
-        if (!track) {
-            return 'No track currently playing.';
-        }
-        return trackToViewModel(track);
-    }
-    catch (error) {
-        console.error('Error fetching current track:', error);
-        return 'Error fetching current track. See console for details.';
-    }
-}
 
-async function getTopTracksCallback({ timeRange }: GetTopTrackParameters): Promise<string | TrackViewModel[]> {
-    try {
-        const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        if (!['short_term', 'medium_term', 'long_term'].includes(timeRange)) {
-            timeRange = 'short_term';
+
+        // ytmusic-api doesn't have a direct "now playing" method
+        // We'll use history to get the most recent song as a workaround
+        const history = await ytMusic.getHistory();
+        if (!history || history.length === 0) {
+            return 'No recent tracks in YouTube Music history.';
         }
-        const result = await api.currentUser.topItems('tracks', timeRange as TimeRange);
-        return result.items.map(trackToViewModel);
+
+        return songToViewModel(history[0]);
     } catch (error) {
-        console.error('Error fetching top tracks:', error);
-        return 'Error fetching top tracks. See console for details.';
+        console.error('Error getting current song:', error);
+        return 'Error getting current song. See console for details.';
     }
 }
 
-async function getRecentTracksCallback(): Promise<string | TrackViewModel[]> {
+async function getQueueCallback(): Promise<string | TrackViewModel[]> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const result = await api.player.getRecentlyPlayedTracks();
-        return result.items.map(i => trackToViewModel(i.track));
-    }
-    catch (error) {
-        console.error('Error fetching recent tracks:', error);
-        return 'Error fetching recent tracks. See console for details.';
-    }
-}
 
-async function getPlaylistsCallback(): Promise<string | PlaylistViewModel[]> {
-    try {
-        const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const result = await api.currentUser.playlists.playlists();
-        return result.items.map(playlistToViewModel);
+
+        // ytmusic-api doesn't have a direct queue access method
+        // Returning a message explaining this limitation
+        return 'The YouTube Music API does not provide access to the current queue. You can view your queue directly in the YouTube Music app or website.';
     } catch (error) {
-        console.error('Error fetching playlists:', error);
-        return 'Error fetching playlists. See console for details.';
+        console.error('Error getting queue:', error);
+        return 'Error getting queue. See console for details.';
     }
 }
 
-async function getPlaylistTracksCallback({ playlistUri }: GetPlaylistTracksParameters) {
+async function getHistoryCallback(): Promise<string | TrackViewModel[]> {
     try {
         const settings = getSettings();
-        if (!settings.clientToken || !settings.clientId) {
-            return 'User is not authenticated with Spotify.';
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
         }
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const playlistId = isSpotifyUri(playlistUri) ? getIdFromSpotifyUri(playlistUri) : playlistUri;
+
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
+        }
+
+        const history = await ytMusic.getHistory();
+        return history.map(songToViewModel);
+    } catch (error) {
+        console.error('Error getting history:', error);
+        return 'Error getting history. See console for details.';
+    }
+}
+
+async function getUserPlaylistsCallback(): Promise<string | PlaylistViewModel[]> {
+    try {
+        const settings = getSettings();
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
+        }
+
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
+        }
+
+        const playlists = await ytMusic.getLibraryPlaylists();
+        return playlists.map(playlistToViewModel);
+    } catch (error) {
+        console.error('Error getting playlists:', error);
+        return 'Error getting playlists. See console for details.';
+    }
+}
+
+async function getPlaylistItemsCallback({ playlistId }: GetPlaylistItemsParameters): Promise<string | TrackViewModel[]> {
+    try {
+        const settings = getSettings();
+        if (!settings.cookieData) {
+            return 'User is not authenticated with YouTube Music.';
+        }
+
         if (!playlistId) {
-            return 'Invalid playlist URI.';
+            return 'Playlist ID is required.';
         }
-        const result = await api.playlists.getPlaylistItems(playlistId);
-        return result.items.map(i => trackToViewModel(i.track));
+
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return 'Failed to initialize YouTube Music client.';
+        }
+
+        const playlistItems = await ytMusic.getPlaylist(playlistId);
+        if (!playlistItems || !playlistItems.tracks) {
+            return 'Playlist not found or empty.';
+        }
+
+        return playlistItems.tracks.map(songToViewModel);
     } catch (error) {
-        console.error('Error fetching playlist tracks:', error);
-        return 'Error fetching playlist tracks. See console for details.';
+        console.error('Error getting playlist items:', error);
+        return 'Error getting playlist items. See console for details.';
     }
 }
 
 export function syncFunctionTools(): void {
     const context = SillyTavern.getContext();
     const settings = getSettings();
+    
     for (const [key, definition] of Object.entries(TOOL_DEFINITIONS)) {
-        if (settings[key]) {
+        if (settings[key as YTMusicTool]) {
             context.registerFunctionTool(definition);
         } else {
-            context.unregisterFunctionTool(key);
+            context.unregisterFunctionTool(definition.name);
         }
     }
 }

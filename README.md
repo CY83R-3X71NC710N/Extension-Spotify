@@ -1,12 +1,12 @@
-# Spotify Extension for SillyTavern
+# YouTube Music Extension for SillyTavern
 
-Provides function tools and information about the currently playing song on Spotify in SillyTavern prompts.
+Provides function tools and information about the currently playing song on YouTube Music in SillyTavern prompts.
 
 ## Installation
 
-Requires the latest SillyTavern staging branch for the auth flow to function.
+Requires the latest SillyTavern staging branch.
 
-Install via the extension installed using the following URL:
+Install via the extension installer using the following URL:
 
 ```txt
 https://github.com/Cohee1207/Extension-Spotify
@@ -14,74 +14,65 @@ https://github.com/Cohee1207/Extension-Spotify
 
 ## Usage
 
-> **Requires to register an application on the Spotify developer dashboard and provide the client ID in the extension settings.**
+> **Requires YouTube Music cookies for authentication**
 
-### Register an app
+### How to Get Your Cookies
 
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and log in with your Spotify account.
-2. Press "Create app" in the top right corner of the dashboard.
-3. Fill in the required fields:
-    - App name (e.g. "SillyTavern Extension")
-    - App description (e.g. "SillyTavern Spotify Extension")
-    - Redirect URIs (see below)
-4. Check "Web API" in the "Which API/SDKs are you planning to use?" section.
-5. Accept the terms and conditions.
-6. Press "Save".
+1. Log in to [YouTube Music](https://music.youtube.com/) in your browser
+2. Open developer tools (F12 or right-click > Inspect)
+3. Go to the Application tab
+4. In the sidebar, navigate to Storage > Cookies > https://music.youtube.com
+5. Copy the cookie values (you'll need to format them as cookie strings, e.g., "CONSENT=YES+; VISITOR_INFO1_LIVE=somevalue; ...")
 
-### Redirect URIs
+### Authentication
 
-The redirect URI **must** correspond to the URL you access SillyTavern on, plus the `/callback/spotify` suffix. For example, if you access SillyTavern via `http://127.0.0.1:8000`, the redirect URI should be: `http://127.0.0.1:8000/callback/spotify`
+1. Paste the cookie string into the "YouTube Music Cookies" field in the extension settings
+2. Click "Authenticate"
+3. If successful, you'll see your YouTube Music account name displayed
 
-Other examples:
-
-- `http://localhost:8000/callback/spotify`
-- `https://myhost.mydomain.local/callback/spotify`
-
-> **Don't forget to click "Add" after entering the redirect URI.**
-
-### Client ID
-
-1. Go to the "Settings" tab of your app.
-2. Copy the "Client ID" and paste it into the extension settings in SillyTavern.
-3. Press "Authenticate". You'll be redirected to the Spotify login page.
-4. Log in to your Spotify account and authorize the app.
-5. After authorization, you'll be redirected to the SillyTavern page with a success message.
-6. If you want to log out, you can do so by clicking the "Logout" button in the extension settings.
+> **Note**: Cookies have an expiration date, and you'll be notified when they're about to expire.
 
 ## Configuration
 
-After performing the initial setup, the extension will now be able to access your Spotify account and provide information about the currently playing song. You can configure the extension, including the injection template, role, position and depth.
+After performing the initial setup, the extension will be able to access your YouTube Music account and provide information about your recently played songs. You can configure the extension, including the injection template, role, position and depth.
 
 ### Template macros
 
 Apart from the usual SillyTavern macros, the template field also supports the following additional parameters:
 
-- `{{song}}`: The name of the song.
-- `{{artist}}`: The name of the artist.
-- `{{album}}`: The name of the album.
-- `{{year}}`: The URL of the album cover.
+- `{{song}}`: The name of the song
+- `{{artist}}`: The name of the artist
+- `{{album}}`: The name of the album (if available)
 
 Example:
 
 ```txt
-{{user}} is listening to {{song}} by {{artist}} from the album {{album}} ({{year}}).
+{{user}} is listening to {{song}} by {{artist}} from the album {{album}}.
 ```
 
 ### Function tools
 
-The extension provides [function tools](https://docs.sillytavern.app/for-contributors/function-calling/) for supported APIs. The following functions are available (can be toggled individually in the extension settings):
+The extension provides [function tools](https://docs.sillytavern.app/for-contributors/function-calling/) for YouTube Music API. The following functions are available (can be toggled individually in the extension settings):
 
-1. "Search Tracks": Search for tracks by name, artist or album.
-2. "Play Item": Play a track, album, artist, or playlist.
-3. "Queue Track": Add a track to the queue.
-4. "Control Playback": Pause, resume, skip to the next track or the previous track.
-5. "Get Current Track": Get a track that is currently playing.
-6. "Get Top Tracks": Get top tracks of the user.
-7. "Get Recent Tracks": Get recently played tracks.
-8. "Get User Playlists": Get playlists of the user.
-9. "Get Playlist Tracks": Get a list of tracks from a playlist.
+1. "Search Songs": Search for songs by name or artist
+2. "Search Artists": Search for artists by name
+3. "Search Albums": Search for albums
+4. "Play Item": Provides a URL to play a song or playlist
+5. "Get Current Song": Gets the most recently played song (YouTube Music API limitation)
+6. "Get Queue": Information about the queue (limited by YouTube Music API)
+7. "Get History": Gets your recently played tracks
+8. "Get User Playlists": Gets playlists of the user
+9. "Get Playlist Items": Gets a list of tracks from a playlist
 
-> "Search Tracks", "Play Item" and "Get Current Track" are enabled by default. The rest are disabled by default.
+> "Search Songs", "Play Item" and "Get Current Song" are enabled by default. The rest are disabled by default.
+
+## YouTube Music API Limitations
+
+The extension uses an unofficial YouTube Music API and may have some limitations compared to the official Spotify API:
+
+- "Current Track" is based on the most recently played song in your history
+- Some playback controls are limited to providing URLs (to be opened by the user)
+- Some YouTube Music features may require authentication renewal more frequently
 
 ## Contributing
 

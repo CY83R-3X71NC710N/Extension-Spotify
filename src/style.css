@@ -1,3 +1,11 @@
 #spotify_template {
     field-sizing: content;
 }
+
+#ytmusic_template {
+    field-sizing: content;
+}
+
+.fa-youtube {
+    color: #FF0000;
+}

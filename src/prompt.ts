@@ -1,7 +1,7 @@
-import { SpotifyApi, Track, Episode } from '@spotify/web-api-ts-sdk';
+import YTMusic from 'ytmusic-api';
 import { INJECT_ID, InjectionPosition } from './constants';
 import { getSettings } from './settings';
-import { refreshTokenIfNeeded } from './auth';
+import { initYTMusicClient, checkCookieExpiration } from './auth';
 
 const { setExtensionPrompt, substituteParamsExtended } = SillyTavern.getContext();
 
@@ -12,46 +12,44 @@ export function resetInject() {
 
 export async function setCurrentTrack(): Promise<void> {
     resetInject();
-
     const settings = getSettings();
-    if (!settings.clientToken || !settings.clientId || !settings.template || settings.position === InjectionPosition.None) {
+    if (!settings.cookieData || !settings.template || settings.position === InjectionPosition.None) {
         return;
     }
 
     try {
-        await refreshTokenIfNeeded(settings);
-        const api = SpotifyApi.withAccessToken(settings.clientId, settings.clientToken);
-        const currentlyPlaying = await api.player.getCurrentlyPlayingTrack();
-        console.log('Currently playing Spotify track:', currentlyPlaying);
-        const params = getPromptParams(currentlyPlaying.item);
+        checkCookieExpiration(settings);
+        const ytMusic = await initYTMusicClient(settings);
+        if (!ytMusic) {
+            return;
+        }
+
+        // Get the currently playing track
+        // Note: YTMusic API doesn't have a direct "get currently playing" method
+        // We'll use the history to get the most recent track as a workaround
+        const history = await ytMusic.getHistory();
+        if (!history || history.length === 0) {
+            console.log('No recent tracks in YouTube Music history');
+            return;
+        }
+
+        // Get the most recent track from history
+        const currentTrack = history[0];
+        console.log('Most recent YouTube Music track:', currentTrack);
+
+        // Extract track details for the prompt
+        const params = {
+            song: currentTrack.title,
+            artist: Array.isArray(currentTrack.artists) 
+                ? currentTrack.artists.map((a: any) => a.name).join(', ') 
+                : currentTrack.artists?.name || 'Unknown Artist',
+            album: currentTrack.album?.name || '',
+            // YouTube Music doesn't have release years directly available in the API
+        };
+
         const message = substituteParamsExtended(settings.template, params);
         setExtensionPrompt(INJECT_ID, message, settings.position, settings.depth, settings.scan, settings.role);
     } catch (error) {
-        console.error('Error fetching currently playing track:', error);
+        console.error('Error fetching currently playing track from YouTube Music:', error);
     }
-}
-
-function getPromptParams(value: Track | Episode): Record<string, string> {
-    if (!value) {
-        return {};
-    }
-    switch (value.type) {
-        case 'track': {
-            const track = value as Track;
-            return {
-                song: track.name,
-                artist: track.artists.map(a => a.name)?.join(', '),
-                album: track.album.name,
-                year: track.album.release_date.split('-')[0],
-            };
-        };
-        case 'show': {
-            const episode = value as Episode;
-            return {
-                song: episode.name,
-                artist: episode.show.name,
-            };
-        };
-    }
-    return {};
 }
