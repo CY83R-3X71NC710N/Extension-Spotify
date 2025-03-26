@@ -9,7 +9,7 @@ Requires the latest SillyTavern staging branch.
 Install via the extension installer using the following URL:
 
 ```txt
-https://github.com/Cohee1207/Extension-Spotify
+https://github.com/SillyTavern/Extension-Spotify
 ```
 
 ## Usage
